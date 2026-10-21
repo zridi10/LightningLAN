@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from lanshare.indexer import Indexer, is_ignored_name
+from lightninglan.indexer import Indexer, is_ignored_name
 
 from .conftest import can_symlink, make_junction, windows_only
 
@@ -57,7 +57,7 @@ def test_skips_hidden_temp_and_junk_files(tmp_path):
     for junk in [".hidden", "Thumbs.db", "desktop.ini", ".DS_Store", "movie.mkv.part", "x.tmp",
                  "~$report.docx", "dl.crdownload"]:
         write(tmp_path / junk, b"j")
-    write(tmp_path / ".lanshare-partial" / "abc.part", b"partial")
+    write(tmp_path / ".lightninglan-partial" / "abc.part", b"partial")
     write(tmp_path / ".git" / "config", b"git")
     idx = Indexer(tmp_path)
     idx.scan()

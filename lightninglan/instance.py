@@ -1,4 +1,4 @@
-"""One running LanShare per user (more precisely, per config folder).
+"""One running LightningLAN per user (more precisely, per config folder).
 
 The running instance holds a lock file in the app-data folder and records the port it listens
 on. A second launch finds that record, checks that the instance answers, and opens its web UI
@@ -16,7 +16,7 @@ from typing import BinaryIO
 
 import httpx
 
-LOCK_FILE = "lanshare.lock"
+LOCK_FILE = "lightninglan.lock"
 INSTANCE_FILE = "instance.json"
 
 

@@ -3,7 +3,7 @@ import socket
 
 import pytest
 
-from lanshare.config import ConfigError, clean_display_name, load_settings
+from lightninglan.config import ConfigError, clean_display_name, load_settings
 
 
 def test_peer_id_is_generated_once_and_persisted(tmp_path):

@@ -8,9 +8,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from lanshare.config import load_settings
-from lanshare.node import Node
-from lanshare.server import create_app
+from lightninglan.config import load_settings
+from lightninglan.node import Node
+from lightninglan.server import create_app
 
 LOCAL_CLIENT = ("127.0.0.1", 50123)
 LAN_CLIENT = ("192.168.1.50", 50123)

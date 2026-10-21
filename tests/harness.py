@@ -1,7 +1,7 @@
-"""Integration-test harness: real LanShare peers as separate processes on this machine.
+"""Integration-test harness: real LightningLAN peers as separate processes on this machine.
 
 Each peer gets its own port, config file, shared folder and downloads folder. Peers find each
-other through real mDNS. Set LANSHARE_TEST_INTERFACE=127.0.0.1 to keep discovery on loopback
+other through real mDNS. Set LIGHTNINGLAN_TEST_INTERFACE=127.0.0.1 to keep discovery on loopback
 (useful on machines without a LAN connection).
 """
 
@@ -18,7 +18,7 @@ from typing import Callable
 import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CLIENT_HEADERS = {"X-LanShare-Client": "test"}
+CLIENT_HEADERS = {"X-LightningLAN-Client": "test"}
 
 
 def free_port() -> int:
@@ -73,7 +73,7 @@ class PeerProcess:
 
     def command(self) -> list[str]:
         cmd = [
-            sys.executable, "-m", "lanshare",
+            sys.executable, "-m", "lightninglan",
             "--share", str(self.share),
             "--downloads", str(self.downloads),
             "--port", str(self.port),
@@ -85,7 +85,7 @@ class PeerProcess:
         ]
         if self.passphrase:
             cmd += ["--passphrase", self.passphrase]
-        iface = os.environ.get("LANSHARE_TEST_INTERFACE")
+        iface = os.environ.get("LIGHTNINGLAN_TEST_INTERFACE")
         if iface:
             cmd += ["--interface", iface]
         return cmd + list(self.extra_args)

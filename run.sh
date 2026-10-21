@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LanShare launcher for macOS and Linux: creates .venv, installs requirements, starts LanShare.
+# LightningLAN launcher for macOS and Linux: creates .venv, installs requirements, starts LightningLAN.
 # Any arguments are passed on, e.g.  ./run.sh --share ~/Shared --name "Den PC"
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -23,7 +23,7 @@ venv_python() {
 
 if ! VENV_PY=$(venv_python); then
   if ! PY=$(find_python); then
-    echo "LanShare needs Python 3.11 or newer: https://www.python.org/downloads/" >&2
+    echo "LightningLAN needs Python 3.11 or newer: https://www.python.org/downloads/" >&2
     exit 1
   fi
   echo "Creating virtual environment in .venv ..."
@@ -43,4 +43,4 @@ if ! cmp -s requirements.txt .venv/requirements.installed; then
   cp requirements.txt .venv/requirements.installed
 fi
 
-exec "$VENV_PY" -m lanshare "$@"
+exec "$VENV_PY" -m lightninglan "$@"

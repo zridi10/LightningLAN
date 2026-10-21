@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from lanshare.auth import Authenticator
-from lanshare.peers import ONLINE, Peer, PeerTable, RemoteFile
-from lanshare.transfers import COMPLETED, FAILED, PARTIAL_DIR_NAME, DownloadManager
+from lightninglan.auth import Authenticator
+from lightninglan.peers import ONLINE, Peer, PeerTable, RemoteFile
+from lightninglan.transfers import COMPLETED, FAILED, PARTIAL_DIR_NAME, DownloadManager
 
 OWN_ID = "0" * 32
 FAKE_ID = "f" * 32
@@ -220,7 +220,7 @@ def test_starting_a_failed_download_again_resumes_the_same_entry(setup):
 
 
 def test_start_without_sources(setup):
-    from lanshare.transfers import DownloadError
+    from lightninglan.transfers import DownloadError
 
     mgr, fake, sha, downloads = setup(b"x")
     with pytest.raises(DownloadError):

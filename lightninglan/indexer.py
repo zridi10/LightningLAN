@@ -108,7 +108,7 @@ class Indexer:
         return self._by_hash.get(sha256)
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="lanshare-indexer", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="lightninglan-indexer", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:

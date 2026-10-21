@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Build the LanShare desktop app with PyInstaller, for the system this runs on.
+"""Build the LightningLAN desktop app with PyInstaller, for the system this runs on.
 
     python build.py                 build into dist/
     python build.py --smoke-test    ...then start the result and check that it works
 
 Results:
-    Windows  dist/LanShare.exe
-    macOS    dist/LanShare-macOS.zip  (LanShare.app, zipped for download)
-    Linux    dist/LanShare-linux-<arch>
+    Windows  dist/LightningLAN.exe
+    macOS    dist/LightningLAN-macOS.zip  (LightningLAN.app, zipped for download)
+    Linux    dist/LightningLAN-linux-<arch>
 
 If the Python running this lacks the requirements, a .venv is created (or reused) next to this
 file and the build runs from there. Building for another OS needs that OS; the GitHub Actions
@@ -63,7 +63,7 @@ def run_in_venv(argv: list[str]) -> int:
 
 def version() -> str:
     sys.path.insert(0, str(ROOT))
-    from lanshare import __version__
+    from lightninglan import __version__
 
     return __version__
 
@@ -72,12 +72,12 @@ def write_windows_version_file(path: Path, ver: str) -> None:
     parts = [int(p) for p in (ver.split(".") + ["0", "0", "0"])[:4] if p.isdigit()]
     numbers = tuple((parts + [0, 0, 0, 0])[:4])
     strings = {
-        "CompanyName": "LanShare",
-        "FileDescription": "LanShare",  # shown in Task Manager and the firewall prompt
+        "CompanyName": "LightningLAN",
+        "FileDescription": "LightningLAN",  # shown in Task Manager and the firewall prompt
         "FileVersion": ver,
-        "InternalName": "LanShare",
-        "OriginalFilename": "LanShare.exe",
-        "ProductName": "LanShare",
+        "InternalName": "LightningLAN",
+        "OriginalFilename": "LightningLAN.exe",
+        "ProductName": "LightningLAN",
         "ProductVersion": ver,
     }
     table = ",\n          ".join(f"StringStruct({k!r}, {v!r})" for k, v in strings.items())
@@ -99,38 +99,38 @@ def write_windows_version_file(path: Path, ver: str) -> None:
 def linux_asset_name() -> str:
     arch = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}.get(
         platform.machine().lower(), platform.machine().lower())
-    return f"LanShare-linux-{arch}"
+    return f"LightningLAN-linux-{arch}"
 
 
 def build() -> tuple[Path, list[str]]:
     """Run PyInstaller. Returns (file to distribute, command that starts the app)."""
-    from lanshare.desktop import fix_tcl_tk_paths
-    from lanshare.icon import write_icon_files
+    from lightninglan.desktop import fix_tcl_tk_paths
+    from lightninglan.icon import write_icon_files
 
     fix_tcl_tk_paths()  # so PyInstaller can bundle Tcl/Tk (the Windows folder chooser) from a venv
     BUILD.mkdir(exist_ok=True)
     write_icon_files(BUILD / "icons")
     write_windows_version_file(BUILD / "version_info.txt", version())
     subprocess.check_call([
-        sys.executable, "-m", "PyInstaller", str(ROOT / "packaging" / "lanshare.spec"),
+        sys.executable, "-m", "PyInstaller", str(ROOT / "packaging" / "lightninglan.spec"),
         "--noconfirm", "--clean", "--distpath", str(DIST), "--workpath", str(BUILD / "pyinstaller"),
     ])
     if sys.platform == "win32":
-        exe = DIST / "LanShare.exe"
+        exe = DIST / "LightningLAN.exe"
         return exe, [str(exe)]
     if sys.platform == "darwin":
-        app = DIST / "LanShare.app"
-        return app, [str(app / "Contents" / "MacOS" / "LanShare")]
+        app = DIST / "LightningLAN.app"
+        return app, [str(app / "Contents" / "MacOS" / "LightningLAN")]
     binary = DIST / linux_asset_name()
     if binary.exists():
         binary.unlink()
-    (DIST / "LanShare").rename(binary)
+    (DIST / "LightningLAN").rename(binary)
     return binary, [str(binary)]
 
 
 def zip_mac_app(app: Path) -> Path:
-    """Zip LanShare.app the way Finder does (keeps symlinks and code signatures intact)."""
-    archive = DIST / "LanShare-macOS.zip"
+    """Zip LightningLAN.app the way Finder does (keeps symlinks and code signatures intact)."""
+    archive = DIST / "LightningLAN-macOS.zip"
     if archive.exists():
         archive.unlink()
     subprocess.check_call(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(archive)])
@@ -147,14 +147,14 @@ def free_port() -> int:
 
 def http(method: str, url: str) -> tuple[int, bytes]:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    req = urllib.request.Request(url, method=method, headers={"X-LanShare-Client": "build"})
+    req = urllib.request.Request(url, method=method, headers={"X-LightningLAN-Client": "build"})
     with opener.open(req, timeout=5) as resp:
         return resp.status, resp.read()
 
 
 def smoke_test(command: list[str]) -> None:
     """Start the built app in a scratch folder and check the web UI, indexing and shutdown."""
-    with tempfile.TemporaryDirectory(prefix="lanshare-smoke-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="lightninglan-smoke-") as tmp:
         tmp_path = Path(tmp)
         port = free_port()
         base = f"http://127.0.0.1:{port}"
@@ -201,8 +201,8 @@ def smoke_test(command: list[str]) -> None:
             code = proc.wait(timeout=30)
             if code != 0:
                 raise RuntimeError(f"the app exited with code {code} after shutdown")
-            log_file = tmp_path / "logs" / "lanshare.log"
-            assert log_file.exists() and "LanShare stopped" in log_file.read_text(encoding="utf-8"), "no log file"
+            log_file = tmp_path / "logs" / "lightninglan.log"
+            assert log_file.exists() and "LightningLAN stopped" in log_file.read_text(encoding="utf-8"), "no log file"
             print("  clean shutdown, log file written", flush=True)
         except BaseException:
             if proc.poll() is None:
@@ -210,9 +210,9 @@ def smoke_test(command: list[str]) -> None:
                 proc.wait(timeout=30)
             print("---- app output ----")
             print(log_path.read_text(encoding="utf-8", errors="replace"))
-            log_file = tmp_path / "logs" / "lanshare.log"
+            log_file = tmp_path / "logs" / "lightninglan.log"
             if log_file.exists():
-                print("---- lanshare.log ----")
+                print("---- lightninglan.log ----")
                 print(log_file.read_text(encoding="utf-8", errors="replace"))
             raise
     print("Smoke test passed.", flush=True)
@@ -225,7 +225,7 @@ def main() -> int:
     parser.add_argument("--smoke-test", action="store_true", help="start the built app and check it works")
     args = parser.parse_args()
     if sys.version_info < (3, 11):
-        print("LanShare needs Python 3.11 or newer.", file=sys.stderr)
+        print("LightningLAN needs Python 3.11 or newer.", file=sys.stderr)
         return 1
     if not has_requirements():
         return run_in_venv(sys.argv[1:])

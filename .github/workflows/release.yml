@@ -1,6 +1,6 @@
 # Builds the desktop app on Windows and Linux and publishes a GitHub Release.
 #
-# Push a tag such as v1.0.0 (it must match __version__ in lanshare/__init__.py) to build and
+# Push a tag such as v1.0.0 (it must match __version__ in lightninglan/__init__.py) to build and
 # release. "Run workflow" on the Actions tab builds without releasing; the files are then
 # attached to the run as artifacts.
 
@@ -23,14 +23,14 @@ jobs:
         include:
           - name: Windows
             os: windows-latest
-            asset: dist/LanShare.exe
+            asset: dist/LightningLAN.exe
           # macOS is not released yet (never tested on a Mac). To add it, uncomment:
           # - name: macOS
           #   os: macos-14  # Apple silicon
-          #   asset: dist/LanShare-macOS.zip
+          #   asset: dist/LightningLAN-macOS.zip
           - name: Linux
             os: ubuntu-22.04  # the oldest glibc we build on is the oldest one the binary runs on
-            asset: dist/LanShare-linux-x86_64
+            asset: dist/LightningLAN-linux-x86_64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -44,9 +44,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('lanshare/__init__.py').read())[1])")
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('lightninglan/__init__.py').read())[1])")
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match __version__ = $version in lanshare/__init__.py"
+            echo "::error::Tag $GITHUB_REF_NAME does not match __version__ = $version in lightninglan/__init__.py"
             exit 1
           fi
 
@@ -61,7 +61,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LanShare-${{ matrix.name }}
+          name: LightningLAN-${{ matrix.name }}
           path: ${{ matrix.asset }}
           if-no-files-found: error
 
@@ -91,8 +91,8 @@ jobs:
 
           | Computer | File |
           | --- | --- |
-          | Windows 10 or 11 | \`LanShare.exe\` |
-          | Linux (64-bit PC) | \`LanShare-linux-x86_64\` |
+          | Windows 10 or 11 | \`LightningLAN.exe\` |
+          | Linux (64-bit PC) | \`LightningLAN-linux-x86_64\` |
 
           There is no Mac version yet.
 
@@ -102,6 +102,6 @@ jobs:
           EOF
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "LanShare $GITHUB_REF_NAME" \
+            --title "LightningLAN $GITHUB_REF_NAME" \
             --notes-file notes.md \
             --generate-notes

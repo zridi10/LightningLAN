@@ -10,7 +10,7 @@ import pytest
 from .conftest import LAN_CLIENT, make_junction, windows_only
 from .harness import common_files, start_together, wait_for
 
-UI = {"X-LanShare-Client": "ui"}
+UI = {"X-LightningLAN-Client": "ui"}
 
 
 def upload(peer, name, data: bytes, **params):
@@ -219,7 +219,7 @@ def test_aborted_upload_leaves_no_temp_file(spawn):
     with socket.create_connection(("127.0.0.1", a.port)) as s:
         s.sendall(
             b"POST /api/upload?name=aborted.bin HTTP/1.1\r\n"
-            b"Host: 127.0.0.1\r\nX-LanShare-Client: test\r\n"
+            b"Host: 127.0.0.1\r\nX-LightningLAN-Client: test\r\n"
             b"Content-Length: 50000000\r\n\r\n" + os.urandom(2 * 1024 * 1024)
         )
         time.sleep(0.5)

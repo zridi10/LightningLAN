@@ -16,10 +16,10 @@ import threading
 import time
 from typing import Mapping
 
-TOKEN_HEADER = "X-LanShare-Auth"
-PROOF_HEADER = "X-LanShare-Proof"
+TOKEN_HEADER = "X-LightningLAN-Auth"
+PROOF_HEADER = "X-LightningLAN-Proof"
 MAX_CLOCK_SKEW = 300  # seconds
-_KDF_SALT = b"lanshare/v1/peer-auth"
+_KDF_SALT = b"lightninglan/v1/peer-auth"
 _KDF_ITERATIONS = 200_000
 _TOKEN_RE = re.compile(r"^v1\.([0-9a-f]{32})\.(\d{1,12})\.([0-9a-f]{24})\.([0-9a-f]{64})$")
 

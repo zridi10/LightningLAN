@@ -39,15 +39,15 @@ class Tray:
         self._thread: threading.Thread | None = None
         item, separator = pystray.MenuItem, pystray.Menu.SEPARATOR
         menu = pystray.Menu(
-            item("Open LanShare", self._action(self.open_ui), default=True),
+            item("Open LightningLAN", self._action(self.open_ui), default=True),
             separator,
             item("Open Shared Folder", self._action(lambda: self._open_folder(self.node.settings.share_dir))),
             item("Open Downloads Folder", self._action(lambda: self._open_folder(self.node.settings.downloads_dir))),
             item("Open Log Folder", self._action(lambda: self._open_folder(self.log_dir))),
             separator,
-            item("Quit LanShare", self._action(self.quit)),
+            item("Quit LightningLAN", self._action(self.quit)),
         )
-        self.icon = pystray.Icon("LanShare", draw_icon(64), self.title(), menu)
+        self.icon = pystray.Icon("LightningLAN", draw_icon(64), self.title(), menu)
 
     # ----- menu actions -----------------------------------------------------------------
 
@@ -76,7 +76,7 @@ class Tray:
     def title(self) -> str:
         n = len(self.node.peers.online())
         peers = "no peers online" if n == 0 else f"{n} peer{'s' if n != 1 else ''} online"
-        return f"LanShare: {self.node.settings.name[:60]} ({peers})"
+        return f"LightningLAN: {self.node.settings.name[:60]} ({peers})"
 
     # ----- running ----------------------------------------------------------------------
 
@@ -86,7 +86,7 @@ class Tray:
 
     def start(self) -> None:
         """Run the icon on a background thread (Windows and Linux)."""
-        self._thread = threading.Thread(target=self._run_quietly, name="lanshare-tray", daemon=True)
+        self._thread = threading.Thread(target=self._run_quietly, name="lightninglan-tray", daemon=True)
         self._thread.start()
 
     def _run_quietly(self) -> None:
@@ -108,7 +108,7 @@ class Tray:
     def _ready(self, icon) -> None:
         icon.visible = True
         log.info("tray icon ready")
-        threading.Thread(target=self._refresh_title, name="lanshare-tray-title", daemon=True).start()
+        threading.Thread(target=self._refresh_title, name="lightninglan-tray-title", daemon=True).start()
 
     def _refresh_title(self) -> None:
         while not self._stopped.wait(TITLE_REFRESH_SECONDS):

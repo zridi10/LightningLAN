@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from lanshare.serving import UNSATISFIABLE, parse_range
+from lightninglan.serving import UNSATISFIABLE, parse_range
 
 from .conftest import LAN_CLIENT
 

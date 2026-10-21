@@ -1,4 +1,4 @@
-"""Entry point for `python -m lanshare` and for the packaged desktop app.
+"""Entry point for `python -m lightninglan` and for the packaged desktop app.
 
 With no arguments it runs zero-config: default folders, the computer's name, port 8765 (or the
 next free one), a tray icon, and the web UI opened in the browser. Launching it again while it
@@ -28,7 +28,7 @@ from .node import Node
 from .resources import is_frozen
 from .server import create_app
 
-log = logging.getLogger("lanshare")
+log = logging.getLogger("lightninglan")
 
 PORT_SEARCH_RANGE = 20  # without --port, try this many ports from the remembered one
 FILE_ONLY = {"file_only": True}
@@ -42,8 +42,8 @@ class Fatal(Exception):
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="python -m lanshare",
-        description="LanShare: share a folder with everyone on your local network.",
+        prog="python -m lightninglan",
+        description="LightningLAN: share a folder with everyone on your local network.",
     )
     p.add_argument("--share", metavar="FOLDER", help="folder to share (remembered for next time)")
     p.add_argument("--downloads", metavar="FOLDER", help="where downloads are saved (remembered)")
@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
     p.add_argument("--no-tray", action="store_true", help="no tray icon and no pop-up messages (servers, scripts)")
     p.add_argument("--verbose", "-v", action="store_true", help="log requests and debug output")
-    p.add_argument("--version", action="version", version=f"LanShare {__version__}")
+    p.add_argument("--version", action="version", version=f"LightningLAN {__version__}")
     return p
 
 
@@ -135,7 +135,7 @@ def print_banner(settings: Settings, addresses: list[str]) -> None:
     lan = ", ".join(f"{ip}:{settings.port}" for ip in addresses) or "discovery off"
     lines = [
         "",
-        f"  LanShare {__version__} is running as \"{settings.name}\"",
+        f"  LightningLAN {__version__} is running as \"{settings.name}\"",
         f"  Web UI:     {url}",
         f"  LAN:        {lan}",
         f"  Sharing:    {settings.share_dir}",
@@ -147,7 +147,7 @@ def print_banner(settings: Settings, addresses: list[str]) -> None:
     ]
     print("\n".join(lines), flush=True)
     log.info(
-        "LanShare %s running as %r: web UI %s, LAN %s, sharing %s, downloads %s, passphrase %s",
+        "LightningLAN %s running as %r: web UI %s, LAN %s, sharing %s, downloads %s, passphrase %s",
         __version__, settings.name, url, lan, settings.share_dir, settings.downloads_dir,
         "on" if settings.passphrase else "off", extra=FILE_ONLY,
     )
@@ -190,7 +190,7 @@ def _report_error(message: str, gui: bool) -> None:
     print(f"error: {message}", file=sys.stderr, flush=True)
     log.error("%s", message, extra=FILE_ONLY)
     if gui:
-        show_message("LanShare", message)
+        show_message("LightningLAN", message)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -228,13 +228,13 @@ def _run(args: argparse.Namespace, gui: bool) -> int:
         except OSError as exc:
             raise Fatal(
                 f"cannot listen on port {settings.port} ({exc.strerror or exc}).\n"
-                f"Is LanShare already running? Use --port to pick another port.",
+                f"Is LightningLAN already running? Use --port to pick another port.",
                 1,
             ) from exc
         settings.port = sock.getsockname()[1]
         lock.publish(settings.port, settings.peer_id)
         _serve(settings, sock, args)
-        log.info("LanShare stopped", extra=FILE_ONLY)
+        log.info("LightningLAN stopped", extra=FILE_ONLY)
         return 0
     finally:
         lock.release()
@@ -245,11 +245,11 @@ def _hand_over(state_dir: Path, args: argparse.Namespace) -> int:
     url = running_instance_url(state_dir)
     if url is None:
         raise Fatal(
-            "LanShare is already running but is not responding. Wait a moment and try again, "
+            "LightningLAN is already running but is not responding. Wait a moment and try again, "
             "or quit it from its tray icon.",
             1,
         )
-    print(f"LanShare is already running: {url}", flush=True)
+    print(f"LightningLAN is already running: {url}", flush=True)
     if not args.no_browser:
         open_url(url)
     return 0
@@ -315,10 +315,10 @@ def _serve_with_tray_on_main_thread(server: uvicorn.Server, sock: socket.socket,
             tray.stop()
             tray_done.wait(1.0)
 
-    server_thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, name="lanshare-server")
-    threading.Thread(target=stop_on_signal, name="lanshare-signals", daemon=True).start()
+    server_thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, name="lightninglan-server")
+    threading.Thread(target=stop_on_signal, name="lightninglan-signals", daemon=True).start()
     server_thread.start()
-    threading.Thread(target=stop_tray_when_server_ends, name="lanshare-tray-stop", daemon=True).start()
+    threading.Thread(target=stop_tray_when_server_ends, name="lightninglan-tray-stop", daemon=True).start()
     try:
         tray.run()
     except Exception:

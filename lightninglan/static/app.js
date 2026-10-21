@@ -1,13 +1,13 @@
-/* LanShare web UI. Plain ES2017, no build step.
+/* LightningLAN web UI. Plain ES2017, no build step.
  *
  * Every piece of text that came from a file name or a peer is inserted with textContent,
- * never as HTML. State-changing requests carry the X-LanShare-Client header the server
+ * never as HTML. State-changing requests carry the X-LightningLAN-Client header the server
  * requires (it blocks cross-site requests from other web pages).
  */
 (function () {
   'use strict';
 
-  var CLIENT_HEADER = { 'X-LanShare-Client': 'ui' };
+  var CLIENT_HEADER = { 'X-LightningLAN-Client': 'ui' };
   var ACTIVE = { queued: true, downloading: true, verifying: true };
   var JUNK = { 'thumbs.db': true, 'ehthumbs.db': true, 'desktop.ini': true, '.ds_store': true };
   var TEMP_SUFFIXES = ['.part', '.partial', '.crdownload', '.tmp'];
@@ -105,7 +105,7 @@
   // ----- theme ----------------------------------------------------------------------------
 
   function storedTheme() {
-    try { return localStorage.getItem('lanshare-theme') || 'auto'; } catch (e) { return 'auto'; }
+    try { return localStorage.getItem('lightninglan-theme') || 'auto'; } catch (e) { return 'auto'; }
   }
 
   function applyTheme(mode) {
@@ -118,7 +118,7 @@
 
   function cycleTheme() {
     var next = THEMES[(THEMES.indexOf(storedTheme()) + 1) % THEMES.length];
-    try { localStorage.setItem('lanshare-theme', next); } catch (e) { /* private mode */ }
+    try { localStorage.setItem('lightninglan-theme', next); } catch (e) { /* private mode */ }
     applyTheme(next);
   }
 
@@ -129,7 +129,7 @@
     var s = state.status;
     $('self-name').textContent = s.name;
     $('self-name').title = s.name;
-    document.title = 'LanShare — ' + s.name;
+    document.title = 'LightningLAN — ' + s.name;
     $('lock').hidden = !s.passphrase_enabled;
     $('share-dir').textContent = s.share_dir;
     $('share-dir').title = s.share_dir;
@@ -145,11 +145,11 @@
   // ----- first-run welcome ----------------------------------------------------------------
 
   function welcomeDismissed() {
-    try { return localStorage.getItem('lanshare-welcome-dismissed') === '1'; } catch (e) { return false; }
+    try { return localStorage.getItem('lightninglan-welcome-dismissed') === '1'; } catch (e) { return false; }
   }
 
   function dismissWelcome() {
-    try { localStorage.setItem('lanshare-welcome-dismissed', '1'); } catch (e) { /* private mode */ }
+    try { localStorage.setItem('lightninglan-welcome-dismissed', '1'); } catch (e) { /* private mode */ }
     $('welcome').hidden = true;
   }
 
@@ -428,7 +428,7 @@
     var empty = $('files-empty');
     if (!state.files.length) {
       empty.textContent = 'Nothing shared yet. Drop files above to share them, or wait for other computers ' +
-        'running LanShare to appear.';
+        'running LightningLAN to appear.';
     } else if (!items.length) {
       empty.textContent = 'No files match “' + state.filter.trim() + '”.';
     }
@@ -666,7 +666,7 @@
     var url = '/api/upload?name=' + encodeURIComponent(job.path);
     if (job.file.lastModified) url += '&mtime=' + job.file.lastModified;
     xhr.open('POST', url);
-    xhr.setRequestHeader('X-LanShare-Client', 'ui');
+    xhr.setRequestHeader('X-LightningLAN-Client', 'ui');
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     job.status.textContent = 'Uploading…';
     xhr.upload.onprogress = function (e) {
@@ -684,7 +684,7 @@
         finishUpload(job, false, errorMessage(data, xhr.status));
       }
     };
-    xhr.onerror = function () { finishUpload(job, false, 'Connection to LanShare lost.'); };
+    xhr.onerror = function () { finishUpload(job, false, 'Connection to LightningLAN lost.'); };
     xhr.send(job.file);
   }
 
@@ -850,11 +850,11 @@
       });
     });
     $('quit').addEventListener('click', async function () {
-      if (!window.confirm('Stop LanShare on this computer? Other peers will no longer see your files.')) return;
+      if (!window.confirm('Stop LightningLAN on this computer? Other peers will no longer see your files.')) return;
       try { await api('POST', '/api/shutdown'); } catch (e) { /* it may already be gone */ }
       state.stopped = true;
       var banner = $('offline-banner');
-      banner.textContent = 'LanShare has stopped. You can close this tab.';
+      banner.textContent = 'LightningLAN has stopped. You can close this tab.';
       banner.hidden = false;
     });
 

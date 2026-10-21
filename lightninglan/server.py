@@ -68,7 +68,7 @@ def create_app(node: Node) -> FastAPI:
         finally:
             await node.stop()
 
-    app = FastAPI(title="LanShare", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="LightningLAN", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.node = node
     app.state.request_shutdown = None
     app.add_middleware(AccessControlMiddleware, auth=node.auth)

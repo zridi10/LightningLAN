@@ -4,7 +4,7 @@
   passphrase is set they require a valid peer token, and responses carry a proof header.
 * Everything else (the web UI, uploads, starting downloads) is for the local user only. It
   requires a loopback client address and a localhost Host header (blocking DNS rebinding).
-  State-changing requests must also carry X-LanShare-Client and, if the browser sent an
+  State-changing requests must also carry X-LightningLAN-Client and, if the browser sent an
   Origin, a local one (blocking cross-site request forgery from other websites).
 """
 
@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from .auth import PROOF_HEADER, TOKEN_HEADER, AuthError, Authenticator
 
-CLIENT_HEADER = "x-lanshare-client"
+CLIENT_HEADER = "x-lightninglan-client"
 _LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
@@ -92,7 +92,7 @@ class AccessControlMiddleware:
 
         client = scope.get("client")
         if not client or not is_loopback(client[0]):
-            await _reject(send, 403, "local_only", "This page is only available on the computer running LanShare.")
+            await _reject(send, 403, "local_only", "This page is only available on the computer running LightningLAN.")
             return
         if not is_local_host_header(headers.get("host")):
             await _reject(send, 403, "bad_host", "Unexpected Host header.")
@@ -103,7 +103,7 @@ class AccessControlMiddleware:
                 await _reject(send, 403, "bad_origin", "Cross-site requests are not allowed.")
                 return
             if CLIENT_HEADER not in headers:
-                await _reject(send, 403, "missing_client_header", "Missing X-LanShare-Client header.")
+                await _reject(send, 403, "missing_client_header", "Missing X-LightningLAN-Client header.")
                 return
         await self.app(scope, receive, send)
 

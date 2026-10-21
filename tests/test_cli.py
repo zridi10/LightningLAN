@@ -10,7 +10,7 @@ from .harness import REPO_ROOT
 
 
 def run_cli(*args, timeout=60):
-    return subprocess.run([sys.executable, "-m", "lanshare", *args], cwd=REPO_ROOT, capture_output=True,
+    return subprocess.run([sys.executable, "-m", "lightninglan", *args], cwd=REPO_ROOT, capture_output=True,
                           text=True, timeout=timeout)
 
 

@@ -4,9 +4,9 @@ import hashlib
 
 import pytest
 
-from lanshare.common import merge_common_space
-from lanshare.indexer import FileEntry
-from lanshare.peers import OFFLINE, ONLINE, Peer, PollError, RemoteFile, parse_index
+from lightninglan.common import merge_common_space
+from lightninglan.indexer import FileEntry
+from lightninglan.peers import OFFLINE, ONLINE, Peer, PollError, RemoteFile, parse_index
 
 from .conftest import LAN_CLIENT
 

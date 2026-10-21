@@ -1,5 +1,5 @@
 @echo off
-rem LanShare launcher for Windows: creates .venv, installs requirements, starts LanShare.
+rem LightningLAN launcher for Windows: creates .venv, installs requirements, starts LightningLAN.
 rem Any arguments are passed on, e.g.  run.bat --share "D:\Shared" --name "Den PC"
 setlocal
 cd /d "%~dp0"
@@ -21,7 +21,7 @@ if not defined PY (
   )
 )
 if not defined PY (
-  echo LanShare needs Python 3.11 or newer.
+  echo LightningLAN needs Python 3.11 or newer.
   echo Install it from https://www.python.org/downloads/ ^(tick "Add python.exe to PATH"^) and run this again.
   pause
   exit /b 1
@@ -50,7 +50,7 @@ if errorlevel 1 (
   copy /y requirements.txt .venv\requirements.installed >nul
 )
 
-"%VENV_PY%" -m lanshare %*
+"%VENV_PY%" -m lightninglan %*
 set "RC=%errorlevel%"
 if not "%RC%"=="0" pause
 exit /b %RC%

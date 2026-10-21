@@ -16,7 +16,7 @@ from .indexer import is_ignored_name
 from .pathsafe import UnsafePathError, is_within, safe_join, split_relative
 
 WRITE_BUFFER = 1024 * 1024
-TEMP_PREFIX = ".lanshare-upload-"
+TEMP_PREFIX = ".lightninglan-upload-"
 
 
 async def receive_upload(request: Request, share_dir: Path, name: str, mtime_ms: float | None) -> dict:

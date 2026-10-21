@@ -1,6 +1,6 @@
 import hashlib
 
-from lanshare import __version__
+from lightninglan import __version__
 
 
 def test_files_endpoint_serves_own_index(peer):

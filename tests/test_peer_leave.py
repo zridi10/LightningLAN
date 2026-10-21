@@ -78,7 +78,7 @@ def test_peer_killed_mid_transfer_shows_error_and_resumes_after_restart(spawn):
     assert d["status"] == "failed", d
     assert "A went offline during the transfer" in d["error"], d["error"]
     assert "press Resume" in d["error"]
-    part = b.downloads / ".lanshare-partial" / f"{file_id}.part"
+    part = b.downloads / ".lightninglan-partial" / f"{file_id}.part"
     kept = part.stat().st_size
     assert 5 * MB <= kept < size
     assert not (b.downloads / "movie.mkv").exists()

@@ -1,6 +1,6 @@
 """Downloading files from other peers.
 
-Each download runs in its own thread and streams into downloads/.lanshare-partial/<sha256>.part.
+Each download runs in its own thread and streams into downloads/.lightninglan-partial/<sha256>.part.
 An existing .part file is resumed with an HTTP Range request. The SHA-256 of the whole file is
 checked before the .part file is renamed into place; on a mismatch the data is discarded. If
 the serving peer disappears, the download fails over to another peer with the same file, or
@@ -27,7 +27,7 @@ from .peers import Peer, PeerTable, RemoteFile, describe_http_error
 
 log = logging.getLogger(__name__)
 
-PARTIAL_DIR_NAME = ".lanshare-partial"
+PARTIAL_DIR_NAME = ".lightninglan-partial"
 CHUNK = 512 * 1024
 READ_TIMEOUT = 15.0
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")

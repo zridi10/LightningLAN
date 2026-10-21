@@ -8,8 +8,8 @@ import sys
 import httpx
 import pytest
 
-from lanshare.cli import bind_first_free
-from lanshare.instance import INSTANCE_FILE, InstanceLock, running_instance_url
+from lightninglan.cli import bind_first_free
+from lightninglan.instance import INSTANCE_FILE, InstanceLock, running_instance_url
 
 from .harness import REPO_ROOT, free_port, wait_for
 
@@ -61,7 +61,7 @@ def _read_json(path):
 
 
 def _launch(*args, **kwargs):
-    return subprocess.run([sys.executable, "-m", "lanshare", *args], cwd=REPO_ROOT, capture_output=True,
+    return subprocess.run([sys.executable, "-m", "lightninglan", *args], cwd=REPO_ROOT, capture_output=True,
                           text=True, timeout=60, **kwargs)
 
 
@@ -70,7 +70,7 @@ def test_second_launch_opens_the_running_copy(spawn):
     a = spawn("Alice PC")
     r = _launch("--config", str(a.config), "--no-browser", "--no-tray")
     assert r.returncode == 0, r.stderr
-    assert f"LanShare is already running: http://localhost:{a.port}" in r.stdout
+    assert f"LightningLAN is already running: http://localhost:{a.port}" in r.stdout
     assert a.running
     assert a.get("/api/status").status_code == 200
 
@@ -84,7 +84,7 @@ def test_busy_port_moves_to_the_next_free_one(tmp_path):
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({"port": busy, "share_dir": str(tmp_path / "s"),
                                    "downloads_dir": str(tmp_path / "d")}))
-        proc = subprocess.Popen([sys.executable, "-m", "lanshare", "--config", str(cfg), "--no-browser",
+        proc = subprocess.Popen([sys.executable, "-m", "lightninglan", "--config", str(cfg), "--no-browser",
                                  "--no-tray", "--interface", "127.0.0.1"], cwd=REPO_ROOT,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -94,11 +94,11 @@ def test_busy_port_moves_to_the_next_free_one(tmp_path):
             assert url == f"http://localhost:{info['port']}"
             # The remembered port stays the preferred one for next time.
             assert json.loads(cfg.read_text())["port"] == busy
-            httpx.post(f"http://127.0.0.1:{info['port']}/api/shutdown", headers={"X-LanShare-Client": "test"},
+            httpx.post(f"http://127.0.0.1:{info['port']}/api/shutdown", headers={"X-LightningLAN-Client": "test"},
                        trust_env=False)
             assert proc.wait(timeout=15) == 0
         finally:
             if proc.poll() is None:
                 proc.kill()
-    log = (tmp_path / "logs" / "lanshare.log").read_text(encoding="utf-8")
-    assert "running as" in log and "LanShare stopped" in log
+    log = (tmp_path / "logs" / "lightninglan.log").read_text(encoding="utf-8")
+    assert "running as" in log and "LightningLAN stopped" in log

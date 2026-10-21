@@ -26,19 +26,19 @@ class ConfigError(Exception):
 def default_config_path() -> Path:
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-        return base / "LanShare" / "config.json"
+        return base / "LightningLAN" / "config.json"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "LanShare" / "config.json"
+        return Path.home() / "Library" / "Application Support" / "LightningLAN" / "config.json"
     base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    return base / "lanshare" / "config.json"
+    return base / "lightninglan" / "config.json"
 
 
 def default_share_dir() -> Path:
-    return Path.home() / "LanShare" / "Shared"
+    return Path.home() / "LightningLAN" / "Shared"
 
 
 def default_downloads_dir() -> Path:
-    return Path.home() / "LanShare" / "Downloads"
+    return Path.home() / "LightningLAN" / "Downloads"
 
 
 def clean_display_name(name: str) -> str:
@@ -66,7 +66,7 @@ class Settings:
 
     @property
     def state_dir(self) -> Path:
-        """Directory for files LanShare maintains itself (hash cache)."""
+        """Directory for files LightningLAN maintains itself (hash cache)."""
         if self.config_path is not None:
             return self.config_path.parent
         return default_config_path().parent

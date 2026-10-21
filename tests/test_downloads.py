@@ -21,7 +21,7 @@ MB = 1024 * 1024
 
 
 def partial_path(peer, file_id):
-    return peer.downloads / ".lanshare-partial" / f"{file_id}.part"
+    return peer.downloads / ".lightninglan-partial" / f"{file_id}.part"
 
 
 def test_large_file_download_streams_and_verifies(spawn):

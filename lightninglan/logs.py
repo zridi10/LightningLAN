@@ -8,12 +8,12 @@ import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-LOG_FILE = "lanshare.log"
+LOG_FILE = "lightninglan.log"
 MAX_LOG_BYTES = 1_000_000
 LOG_BACKUPS = 3
 _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
-log = logging.getLogger("lanshare")
+log = logging.getLogger("lightninglan")
 
 
 def log_dir(state_dir: Path) -> Path:
@@ -41,7 +41,7 @@ def setup_console_logging(verbose: bool) -> None:
 
 
 def add_file_logging(state_dir: Path) -> Path | None:
-    """Also log to <state_dir>/logs/lanshare.log (rotated at 1 MB). Returns the file, or None."""
+    """Also log to <state_dir>/logs/lightninglan.log (rotated at 1 MB). Returns the file, or None."""
     directory = log_dir(state_dir)
     try:
         directory.mkdir(parents=True, exist_ok=True)

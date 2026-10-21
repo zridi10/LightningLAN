@@ -1,4 +1,4 @@
-"""A running LanShare peer: ties the index, discovery, peer polling and transfers together."""
+"""A running LightningLAN peer: ties the index, discovery, peer polling and transfers together."""
 
 from __future__ import annotations
 

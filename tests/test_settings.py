@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from lanshare import desktop, server
-from lanshare.auth import Authenticator
+from lightninglan import desktop, server
+from lightninglan.auth import Authenticator
 
 from .conftest import LAN_CLIENT
 
-UI = {"X-LanShare-Client": "ui"}
+UI = {"X-LightningLAN-Client": "ui"}
 
 
 def save(peer, **changes):
@@ -35,7 +35,7 @@ def test_settings_are_local_only(peer):
     # The passphrase is in there: never readable or writable from the network or other websites.
     assert peer.get("/api/settings", client=LAN_CLIENT).status_code == 403
     assert peer.post("/api/settings", json={"name": "x"}, client=LAN_CLIENT, headers=UI).status_code == 403
-    assert peer.post("/api/settings", json={"name": "x"}).status_code == 403  # no X-LanShare-Client header
+    assert peer.post("/api/settings", json={"name": "x"}).status_code == 403  # no X-LightningLAN-Client header
     r = peer.post("/api/settings", json={"name": "x"},
                   headers={**UI, "Origin": "http://evil.example"})
     assert r.status_code == 403

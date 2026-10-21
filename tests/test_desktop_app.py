@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from lanshare import resources
-from lanshare.icon import draw_icon, write_icon_files
+from lightninglan import resources
+from lightninglan.icon import draw_icon, write_icon_files
 
 
 def test_static_files_are_found_from_source():
@@ -17,7 +17,7 @@ def test_static_files_are_found_from_source():
 
 def test_static_files_are_found_in_a_pyinstaller_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
-    assert resources.static_dir() == tmp_path / "lanshare" / "static"
+    assert resources.static_dir() == tmp_path / "lightninglan" / "static"
 
 
 def test_icon_drawing():
@@ -49,7 +49,7 @@ needs_tray = pytest.mark.skipif(pystray is None, reason=globals().get("_no_tray_
 
 @pytest.fixture
 def tray(tmp_path, monkeypatch):
-    from lanshare import tray as tray_module
+    from lightninglan import tray as tray_module
 
     opened, urls, quits = [], [], []
     monkeypatch.setattr(tray_module, "open_in_file_manager", lambda path, reveal=False: opened.append(path))
@@ -71,29 +71,29 @@ def menu_items(t):
 @needs_tray
 def test_tray_menu(tray):
     assert [item.text for item in menu_items(tray)] == [
-        "Open LanShare", "Open Shared Folder", "Open Downloads Folder", "Open Log Folder", "Quit LanShare",
+        "Open LightningLAN", "Open Shared Folder", "Open Downloads Folder", "Open Log Folder", "Quit LightningLAN",
     ]
     default = [item for item in menu_items(tray) if item.default]
-    assert [item.text for item in default] == ["Open LanShare"]  # what clicking the icon does
+    assert [item.text for item in default] == ["Open LightningLAN"]  # what clicking the icon does
 
 
 @needs_tray
 def test_tray_actions(tray, tmp_path):
     items = {item.text: item for item in menu_items(tray)}
-    items["Open LanShare"](tray.icon)
+    items["Open LightningLAN"](tray.icon)
     assert tray.calls.urls == ["http://localhost:8765"]
     items["Open Shared Folder"](tray.icon)
     items["Open Downloads Folder"](tray.icon)
     items["Open Log Folder"](tray.icon)
     assert tray.calls.opened == [tmp_path / "share", tmp_path / "dl", tmp_path / "logs"]
     assert all(Path(p).is_dir() for p in tray.calls.opened), "missing folders are created first"
-    items["Quit LanShare"](tray.icon)
+    items["Quit LightningLAN"](tray.icon)
     assert tray.calls.quits == [True]
 
 
 @needs_tray
 def test_tray_action_errors_are_contained(tray, monkeypatch):
-    from lanshare import tray as tray_module
+    from lightninglan import tray as tray_module
 
     def broken(path, reveal=False):
         raise OSError("no file manager")
@@ -105,4 +105,4 @@ def test_tray_action_errors_are_contained(tray, monkeypatch):
 
 @needs_tray
 def test_tray_tooltip(tray):
-    assert tray.title() == "LanShare: Den PC (2 peers online)"
+    assert tray.title() == "LightningLAN: Den PC (2 peers online)"

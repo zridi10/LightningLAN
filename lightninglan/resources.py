@@ -1,4 +1,4 @@
-"""Finding the files that ship with LanShare, whether it runs from source or as a packaged app."""
+"""Finding the files that ship with LightningLAN, whether it runs from source or as a packaged app."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ def is_frozen() -> bool:
 
 
 def package_dir() -> Path:
-    """The lanshare package folder. A PyInstaller build unpacks its data files under sys._MEIPASS."""
+    """The lightninglan package folder. A PyInstaller build unpacks its data files under sys._MEIPASS."""
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:
-        return Path(bundle) / "lanshare"
+        return Path(bundle) / "lightninglan"
     return Path(__file__).resolve().parent
 
 

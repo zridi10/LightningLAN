@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LanShare</title>
+  <title>LightningLAN</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
-      <span class="brand-name">LanShare</span>
+      <span class="brand-name">LightningLAN</span>
     </div>
     <div class="me">
       <span class="me-label">You are</span>
@@ -36,14 +36,14 @@
   </header>
 
   <div id="offline-banner" class="banner" hidden role="alert">
-    Lost contact with LanShare on this computer. Is it still running?
+    Lost contact with LightningLAN on this computer. Is it still running?
   </div>
 
   <main class="layout">
     <section class="main-col">
       <section id="welcome" class="card welcome" hidden>
-        <h2>Welcome to LanShare</h2>
-        <p>Files in your shared folder are visible to everyone on this network who runs LanShare.
+        <h2>Welcome to LightningLAN</h2>
+        <p>Files in your shared folder are visible to everyone on this network who runs LightningLAN.
            Other computers show up here by themselves, and so do their files. Nothing to set up.</p>
         <p class="muted small">Your shared folder: <code id="welcome-share"></code></p>
         <div class="welcome-actions">
@@ -103,7 +103,7 @@
       <section class="card">
         <div class="card-head"><h2>Peers</h2></div>
         <ul id="peers" class="peers"></ul>
-        <p id="peers-empty" class="empty small">Looking for other computers running LanShare on your network…</p>
+        <p id="peers-empty" class="empty small">Looking for other computers running LightningLAN on your network…</p>
         <div id="ignored" class="ignored" hidden></div>
       </section>
 
@@ -114,7 +114,7 @@
           <button class="text-btn" type="button" data-open="share">Open</button>
         </div>
         <p class="muted small" id="share-summary"></p>
-        <button id="quit" class="text-btn danger" type="button">Stop LanShare</button>
+        <button id="quit" class="text-btn danger" type="button">Stop LightningLAN</button>
       </section>
     </aside>
   </main>
@@ -154,7 +154,7 @@
           <button id="set-pass-toggle" type="button" class="btn secondary">Show</button>
         </div>
         <span class="field-help">Only computers that use the same passphrase see each other. Leave it empty to share
-          with everyone on the network running LanShare.</span>
+          with everyone on the network running LightningLAN.</span>
       </div>
 
       <p id="settings-error" class="form-error" role="alert" hidden></p>

@@ -6,7 +6,7 @@ import time
 import httpx
 import pytest
 
-from lanshare.auth import PROOF_HEADER, TOKEN_HEADER, AuthError, Authenticator
+from lightninglan.auth import PROOF_HEADER, TOKEN_HEADER, AuthError, Authenticator
 
 from .conftest import LAN_CLIENT, InProcessPeer
 from .harness import common_files, start_together, wait_for

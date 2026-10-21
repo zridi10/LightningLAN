@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lanshare.pathsafe import (
+from lightninglan.pathsafe import (
     UnsafePathError,
     display_name,
     numbered_names,

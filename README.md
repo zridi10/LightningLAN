@@ -1,14 +1,14 @@
-# LanShare
+# LightningLAN
 
 Peer-to-peer file sharing for everyone on the same local network. There is no server and
 no account.
 
-Each person runs LanShare and picks a folder to share. Peers find each other automatically
+Each person runs LightningLAN and picks a folder to share. Peers find each other automatically
 (mDNS/zeroconf), and everyone sees one combined **Common Space**: every file shared by every
 online peer, with its size and who has it. Drag files into the web page to add them to your
 shared folder. Click **Download** to fetch a file directly from the peer that has it.
 
-- Automatic discovery on the LAN (`_lanshare._tcp.local.`), with no IP addresses to type.
+- Automatic discovery on the LAN (`_lightninglan._tcp.local.`), with no IP addresses to type.
 - Identical files on several peers (same SHA-256) are shown once, with every owner listed.
 - Downloads stream to disk, resume after an interruption (HTTP Range) and are verified with
   SHA-256 before they are saved. If the sending peer disappears, another peer with the same
@@ -19,7 +19,7 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
   panel in the web page for everything else.
 
 **Just want to use it?** Download the app for Windows or Linux from the
-[latest release](https://github.com/zridi10/LanShare/releases/latest) and follow [INSTALL.md](INSTALL.md). No Python needed. The rest of this README
+[latest release](https://github.com/zridi10/LightningLAN/releases/latest) and follow [INSTALL.md](INSTALL.md). No Python needed. The rest of this README
 is about running from source, building the app and publishing releases.
 
 ## Requirements (running from source)
@@ -32,9 +32,9 @@ is about running from source, building the app and publishing releases.
 ## Quick start
 
 The launch scripts create a virtual environment in `.venv`, install `requirements.txt` (only
-on the first run and when it changes) and start LanShare. Your browser then opens
+on the first run and when it changes) and start LightningLAN. Your browser then opens
 <http://localhost:8765>, and a lightning-bolt icon appears in the system tray (menu bar on
-macOS). With no arguments, the first run uses `~/LanShare/Shared` and `~/LanShare/Downloads`
+macOS). With no arguments, the first run uses `~/LightningLAN/Shared` and `~/LightningLAN/Downloads`
 and the computer's name. You can change these later in the web page's Settings panel.
 
 **Windows:** double-click `run.bat`, or from a terminal:
@@ -66,18 +66,18 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 source .venv/bin/activate       # macOS / Linux
 pip install -r requirements.txt
-python -m lanshare --share <folder> --downloads <folder> --port 8765 --name "Zach's PC" --passphrase <optional>
+python -m lightninglan --share <folder> --downloads <folder> --port 8765 --name "Zach's PC" --passphrase <optional>
 ```
 
-On start, LanShare prints the local UI URL, the LAN address other peers use, and the shared
+On start, LightningLAN prints the local UI URL, the LAN address other peers use, and the shared
 and downloads folders, then opens the UI in your default browser.
 
 ## Command-line options
 
 | Option | Meaning |
 | --- | --- |
-| `--share FOLDER` | Folder to share. Default `~/LanShare/Shared`. |
-| `--downloads FOLDER` | Where downloads are saved. Default `~/LanShare/Downloads`. It is kept separate from the shared folder unless you point both at the same place. |
+| `--share FOLDER` | Folder to share. Default `~/LightningLAN/Shared`. |
+| `--downloads FOLDER` | Where downloads are saved. Default `~/LightningLAN/Downloads`. It is kept separate from the shared folder unless you point both at the same place. |
 | `--port PORT` | HTTP port for the UI and for other peers. Default `8765`. If that port is taken, the next free one is used, unless you gave `--port`. |
 | `--name NAME` | Name other peers see. Default: the computer's hostname. |
 | `--passphrase TEXT` | Shared secret. Only peers using the same passphrase are visible (see [Security](#security)). |
@@ -97,17 +97,17 @@ config file. The file is readable only by your user account.
 
 The config file holds the peer's unique ID, which is generated on first run. It is stored in:
 
-- Windows: `%APPDATA%\LanShare\config.json`
-- macOS: `~/Library/Application Support/LanShare/config.json`
-- Linux: `$XDG_CONFIG_HOME/lanshare/config.json` (usually `~/.config/lanshare/config.json`)
+- Windows: `%APPDATA%\LightningLAN\config.json`
+- macOS: `~/Library/Application Support/LightningLAN/config.json`
+- Linux: `$XDG_CONFIG_HOME/lightninglan/config.json` (usually `~/.config/lightninglan/config.json`)
 
 Next to it:
 
 - `hash_cache.json` remembers file hashes, so a file is only re-hashed when its size or
   modification time changes.
-- `logs/lanshare.log` is the log, rotated at 1 MB with 3 old copies kept. Open it from the tray
+- `logs/lightninglan.log` is the log, rotated at 1 MB with 3 old copies kept. Open it from the tray
   menu (**Open Log Folder**) or from Settings.
-- `lanshare.lock` and `instance.json` keep LanShare to one copy per config file. Starting it
+- `lightninglan.lock` and `instance.json` keep LightningLAN to one copy per config file. Starting it
   again while it runs just opens the running copy's web page. `--config` with a different file
   starts an independent peer.
 
@@ -122,11 +122,11 @@ locations too.
   copied into your shared folder. If a name is taken, the copy is saved as `name (1).ext`,
   `name (2).ext`, and so on. Hidden and temporary files (names starting with `.`, `*.tmp`,
   `*.part`, `Thumbs.db`, ...) are skipped. You can also just copy files into the shared folder
-  yourself; LanShare rescans it every few seconds.
+  yourself; LightningLAN rescans it every few seconds.
 - **Common Space**: click a column heading to sort, or type in the filter box. Files you
   already have say "In your share".
 - **Downloads**: progress, speed and source, with Pause, Resume and Cancel. While a download
-  runs, the data goes to `<downloads>/.lanshare-partial/<sha256>.part`. The file is renamed into
+  runs, the data goes to `<downloads>/.lightninglan-partial/<sha256>.part`. The file is renamed into
   place only after its SHA-256 matches, and a corrupted transfer is discarded. If the peer goes
   offline mid-transfer, the error says so, the partial file is kept, and **Resume** continues
   from where it stopped once the peer (or another peer with the same file) is back.
@@ -137,9 +137,9 @@ locations too.
   immediately, without a restart. Peers see a new name within seconds. A new shared folder is
   indexed from scratch. Downloads already started finish in the old downloads folder. After a
   passphrase change, every peer is checked again.
-- **Tray / menu bar icon**: Open LanShare (also what clicking the icon does on Windows),
-  Open Shared Folder, Open Downloads Folder, Open Log Folder, Quit LanShare.
-- **Stop LanShare** (in the *Your shared folder* card) shuts this peer down. Ctrl+C in the
+- **Tray / menu bar icon**: Open LightningLAN (also what clicking the icon does on Windows),
+  Open Shared Folder, Open Downloads Folder, Open Log Folder, Quit LightningLAN.
+- **Stop LightningLAN** (in the *Your shared folder* card) shuts this peer down. Ctrl+C in the
   terminal does the same.
 
 Files only appear in the Common Space after they have been hashed. A very large shared folder
@@ -147,7 +147,7 @@ takes a while the first time; after that the hash cache makes restarts quick.
 
 ## Firewall notes
 
-LanShare needs two kinds of traffic between the computers:
+LightningLAN needs two kinds of traffic between the computers:
 
 | Port | Direction | Used for |
 | --- | --- | --- |
@@ -157,11 +157,11 @@ LanShare needs two kinds of traffic between the computers:
 ### Windows (Defender Firewall)
 
 On first start Windows shows *"Windows Defender Firewall has blocked some features of
-Python"* (or *"of LanShare"* for the packaged `LanShare.exe`). Tick **Private networks** and
+Python"* (or *"of LightningLAN"* for the packaged `LightningLAN.exe`). Tick **Private networks** and
 click **Allow access**. When running from source, the prompt names `python.exe` because
-LanShare runs inside Python. If you use the venv, the program allowed is the Python
+LightningLAN runs inside Python. If you use the venv, the program allowed is the Python
 installation the venv was created from. For the packaged app the rule belongs to that copy of
-`LanShare.exe`, so moving the file brings the prompt back.
+`LightningLAN.exe`, so moving the file brings the prompt back.
 
 If you clicked Cancel, or other computers still can't see you:
 
@@ -171,8 +171,8 @@ If you clicked Cancel, or other computers still can't see you:
 2. Allow the ports explicitly (PowerShell as Administrator):
 
    ```powershell
-   New-NetFirewallRule -DisplayName "LanShare (TCP 8765)" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
-   New-NetFirewallRule -DisplayName "LanShare discovery (UDP 5353)" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private
+   New-NetFirewallRule -DisplayName "LightningLAN (TCP 8765)" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
+   New-NetFirewallRule -DisplayName "LightningLAN discovery (UDP 5353)" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private
    ```
 
    Or open *Windows Defender Firewall → Allow an app through firewall* and tick **Private** for
@@ -186,7 +186,7 @@ If you clicked Cancel, or other computers still can't see you:
 - macOS 15 (Sequoia) and later also ask for **Local Network** access, for example *""Terminal"
   would like to find devices on your local network"*. Click **Allow**. If peers never appear,
   check System Settings → Privacy & Security → Local Network and enable the app you started
-  LanShare from (Terminal, iTerm, VS Code, ...).
+  LightningLAN from (Terminal, iTerm, VS Code, ...).
 
 ### Linux
 
@@ -235,9 +235,9 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
   passphrases match (a mismatch is listed under *Not connected* in the Peers card). Guest Wi-Fi
   often isolates clients from each other.
 - **"cannot listen on port 8765"** only happens with an explicit `--port`. Another program
-  uses that port, so pick another one. Without `--port`, LanShare moves to the next free port
+  uses that port, so pick another one. Without `--port`, LightningLAN moves to the next free port
   by itself.
-- **Something else went wrong**: check `logs/lanshare.log` in the config folder (tray menu →
+- **Something else went wrong**: check `logs/lightninglan.log` in the config folder (tray menu →
   **Open Log Folder**).
 - **A peer stays listed briefly after its computer disappears.** Peers that quit normally
   vanish immediately. A computer that drops off the network is removed after 3 failed checks,
@@ -252,15 +252,15 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
 .venv/bin/python -m pytest                # macOS / Linux
 ```
 
-The integration tests start real LanShare processes on random ports, which discover each other
+The integration tests start real LightningLAN processes on random ports, which discover each other
 through real mDNS on this computer. They include a 200 MB transfer, so leave about 1 GB of free
 disk space for the temp folder. Temp files are deleted as each test passes. On a machine with
-no network connection, use loopback for discovery: `LANSHARE_TEST_INTERFACE=127.0.0.1`.
+no network connection, use loopback for discovery: `LIGHTNINGLAN_TEST_INTERFACE=127.0.0.1`.
 Run `pytest -m "not integration"` for the fast unit tests only.
 
 ## Building the desktop app
 
-`build.py` packages LanShare with PyInstaller for the OS it runs on:
+`build.py` packages LightningLAN with PyInstaller for the OS it runs on:
 
 ```bash
 python build.py               # Windows: py build.py
@@ -269,14 +269,14 @@ python build.py --smoke-test  # also start the result and check the UI, indexing
 
 | OS | Result |
 | --- | --- |
-| Windows | `dist/LanShare.exe`, one file with no console window, an icon and version information |
-| macOS | `dist/LanShare-macOS.zip`, containing `LanShare.app`, a menu bar app with no Dock icon |
-| Linux | `dist/LanShare-linux-x86_64`, one file |
+| Windows | `dist/LightningLAN.exe`, one file with no console window, an icon and version information |
+| macOS | `dist/LightningLAN-macOS.zip`, containing `LightningLAN.app`, a menu bar app with no Dock icon |
+| Linux | `dist/LightningLAN-linux-x86_64`, one file |
 
 If the Python running `build.py` lacks the requirements, it creates or reuses `.venv` and
 installs `requirements.txt` and `requirements-build.txt` there. The PyInstaller settings are in
-`packaging/lanshare.spec`. The web UI files are bundled inside the app and found through
-`lanshare/resources.py`. You can only build for the OS you are on. The release workflow builds
+`packaging/lightninglan.spec`. The web UI files are bundled inside the app and found through
+`lightninglan/resources.py`. You can only build for the OS you are on. The release workflow builds
 all three.
 
 The macOS build targets Apple silicon only (arm64): several dependencies publish separate Intel
@@ -287,11 +287,11 @@ binary runs on the glibc version it was built with or newer. CI builds it on Ubu
 ## Publishing a release
 
 `.github/workflows/release.yml` builds on native Windows and Linux runners, runs the unit tests
-and the smoke test on each, and attaches `LanShare.exe`, `LanShare-linux-x86_64` and
+and the smoke test on each, and attaches `LightningLAN.exe`, `LightningLAN-linux-x86_64` and
 `SHA256SUMS.txt` to a GitHub Release. A macOS entry is in the workflow but commented out
 until the Mac app has been tested on a Mac.
 
-1. Set `__version__` in `lanshare/__init__.py` (for example `1.0.0`) and commit.
+1. Set `__version__` in `lightninglan/__init__.py` (for example `1.0.0`) and commit.
 2. Tag and push: `git tag v1.0.0 && git push origin v1.0.0`. The workflow fails early if the tag
    and `__version__` differ.
 
@@ -305,7 +305,7 @@ The files are then attached to the run as artifacts. The apps are not code-signe
 build.py         builds the desktop app with PyInstaller
 packaging/       PyInstaller spec and entry script
 .github/         release workflow (builds and publishes on tag push)
-lanshare/
+lightninglan/
   cli.py         entry point: single instance, port choice, startup banner, browser, tray
   tray.py        system tray / menu bar icon (pystray)
   desktop.py     file manager, browser, message boxes, folder chooser
@@ -352,5 +352,5 @@ tests/           unit tests and a multi-process integration harness
 - On Linux the tray icon uses the classic X11 system tray. It shows on KDE, Xfce, Cinnamon and
   MATE, and on GNOME with the AppIndicator extension. Clicking it opens the web page; it has no
   menu there. Without a tray, run the binary again or open <http://localhost:8765>.
-- LanShare does not add itself to login items. [INSTALL.md](INSTALL.md) shows how to do it by
+- LightningLAN does not add itself to login items. [INSTALL.md](INSTALL.md) shows how to do it by
   hand.

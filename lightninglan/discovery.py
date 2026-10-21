@@ -146,7 +146,7 @@ class Discovery:
     def _build_info(self) -> AsyncServiceInfo:
         return AsyncServiceInfo(
             SERVICE_TYPE,
-            f"LanShare-{self.peer_id}.{SERVICE_TYPE}",
+            f"LightningLAN-{self.peer_id}.{SERVICE_TYPE}",
             addresses=[socket.inet_aton(ip) for ip in self.addresses],
             port=self.port,
             properties={
@@ -155,7 +155,7 @@ class Discovery:
                 "v": __version__,
                 "auth": "1" if self.auth_enabled else "0",
             },
-            server=f"lanshare-{self.peer_id[:12]}.local.",
+            server=f"lightninglan-{self.peer_id[:12]}.local.",
         )
 
     def _on_state_change(

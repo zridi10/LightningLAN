@@ -1,4 +1,4 @@
-from lanshare.netutil import Interface, is_virtual_adapter, lan_addresses
+from lightninglan.netutil import Interface, is_virtual_adapter, lan_addresses
 
 ADAPTERS = [
     Interface("Software Loopback Interface 1", "127.0.0.1"),

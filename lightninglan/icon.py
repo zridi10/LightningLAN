@@ -1,4 +1,4 @@
-"""The LanShare icon, a lightning bolt on an indigo tile (the same shape as static/favicon.svg)."""
+"""The LightningLAN icon, a lightning bolt on an indigo tile (the same shape as static/favicon.svg)."""
 
 from __future__ import annotations
 
@@ -26,9 +26,9 @@ def draw_icon(size: int = 64, margin: float = 0.0):
 
 
 def write_icon_files(directory: Path) -> dict[str, Path]:
-    """Write LanShare.ico (Windows), LanShare.icns (macOS) and LanShare.png for packaging."""
+    """Write LightningLAN.ico (Windows), LightningLAN.icns (macOS) and LightningLAN.png for packaging."""
     directory.mkdir(parents=True, exist_ok=True)
-    paths = {ext: directory / f"LanShare.{ext}" for ext in ("ico", "icns", "png")}
+    paths = {ext: directory / f"LightningLAN.{ext}" for ext in ("ico", "icns", "png")}
     draw_icon(256).save(paths["ico"], sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
     # macOS icons leave a margin around the tile, like Apple's own.
     mac = draw_icon(1024, margin=0.09)
