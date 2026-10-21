@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="how often peers are polled for changes (default 3)",
     )
+    p.add_argument(
+        "--max-upload-rate",
+        type=float,
+        metavar="MB_PER_S",
+        help="limit how fast each peer can download from you, in megabytes per second",
+    )
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
     p.add_argument("--verbose", "-v", action="store_true", help="log requests and debug output")
     p.add_argument("--version", action="version", version=f"LanShare {__version__}")
@@ -81,6 +87,10 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
     if not 0.2 <= args.refresh_interval <= 60:
         raise ConfigError("--refresh-interval must be between 0.2 and 60 seconds")
     settings.refresh_interval = args.refresh_interval
+    if args.max_upload_rate is not None:
+        if args.max_upload_rate <= 0:
+            raise ConfigError("--max-upload-rate must be positive")
+        settings.max_upload_rate = args.max_upload_rate * 1024 * 1024
     return settings
 
 

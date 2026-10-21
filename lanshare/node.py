@@ -13,6 +13,7 @@ from .config import Settings
 from .discovery import Discovery
 from .indexer import Indexer
 from .peers import PeerTable
+from .transfers import DownloadManager
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class Node:
             interval=max(1.0, min(5.0, settings.refresh_interval * 2)),
         )
         self.peers = PeerTable(settings.peer_id, self.auth, settings.refresh_interval)
+        self.downloads = DownloadManager(settings.downloads_dir, self.auth, self.peers)
         self.discovery: Discovery | None = None
         if settings.discovery:
             self.discovery = Discovery(
@@ -61,6 +63,7 @@ class Node:
                 await self.discovery.stop()  # say goodbye before anything else goes away
             except Exception:
                 log.exception("stopping discovery failed")
+        self.downloads.shutdown()
         await self.peers.stop()
         self.indexer.stop()
 

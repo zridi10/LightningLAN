@@ -5,10 +5,18 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from pydantic import BaseModel
 
 from .node import Node
 from .security import AccessControlMiddleware
+from .serving import serve_download
+from .transfers import DownloadError
+
+
+class StartDownload(BaseModel):
+    file_id: str
+    peer_id: str | None = None
 
 
 def etag_matches(if_none_match: str | None, etag: str) -> bool:
@@ -42,6 +50,10 @@ def create_app(node: Node) -> FastAPI:
             return Response(status_code=304, headers=headers)
         return Response(body, media_type="application/json", headers=headers)
 
+    @app.api_route("/api/download/{file_id}", methods=["GET", "HEAD"])
+    def download_file(file_id: str, request: Request) -> Response:
+        return serve_download(node.indexer, file_id, request, node.settings.max_upload_rate)
+
     # ----- local UI API -----------------------------------------------------------------
 
     @app.get("/api/status")
@@ -59,6 +71,40 @@ def create_app(node: Node) -> FastAPI:
     @app.get("/api/peers")
     def peers() -> dict:
         return node.peers_payload()
+
+    @app.get("/api/downloads")
+    def list_downloads() -> dict:
+        return {"downloads": node.downloads.list()}
+
+    @app.post("/api/downloads")
+    def start_download(body: StartDownload) -> dict:
+        try:
+            return node.downloads.start(body.file_id, body.peer_id).to_dict()
+        except DownloadError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/downloads/clear")
+    def clear_downloads() -> dict:
+        node.downloads.clear_finished()
+        return {"downloads": node.downloads.list()}
+
+    @app.post("/api/downloads/{download_id}/{action}")
+    def control_download(download_id: str, action: str) -> dict:
+        actions = {"pause": node.downloads.pause, "resume": node.downloads.resume, "cancel": node.downloads.cancel}
+        if action not in actions:
+            raise HTTPException(404, "unknown action")
+        try:
+            return actions[action](download_id).to_dict()
+        except DownloadError as exc:
+            raise HTTPException(409 if "still" in str(exc) else 404, str(exc)) from exc
+
+    @app.delete("/api/downloads/{download_id}")
+    def remove_download(download_id: str) -> dict:
+        try:
+            node.downloads.remove(download_id)
+        except DownloadError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"ok": True}
 
     @app.post("/api/shutdown")
     async def shutdown(request: Request) -> dict:
