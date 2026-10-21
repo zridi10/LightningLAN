@@ -48,6 +48,14 @@ def create_app(node: Node) -> FastAPI:
     def status() -> dict:
         return node.status()
 
+    @app.get("/api/common")
+    def common_space(request: Request) -> Response:
+        body, etag = node.common_payload()
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
+
     @app.get("/api/peers")
     def peers() -> dict:
         return node.peers_payload()

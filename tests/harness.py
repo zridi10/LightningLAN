@@ -175,3 +175,20 @@ def dump_logs(peers: list[PeerProcess]) -> str:
 
 def pretty(obj: object) -> str:
     return json.dumps(obj, indent=2)
+
+
+def start_together(*peers: PeerProcess) -> None:
+    """Start several peers in parallel (process start-up dominates test time)."""
+    for p in peers:
+        p.start(wait=False)
+    for p in peers:
+        p.wait_ready()
+
+
+def common_files(peer: PeerProcess) -> dict[str, dict]:
+    """The peer's Common Space keyed by file name."""
+    return {f["name"]: f for f in peer.get("/api/common").json()["files"]}
+
+
+def source_ids(item: dict) -> set[str]:
+    return {s["peer_id"] for s in item["sources"]}

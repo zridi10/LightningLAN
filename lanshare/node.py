@@ -8,6 +8,7 @@ import logging
 
 from . import __version__
 from .auth import Authenticator
+from .common import merge_common_space
 from .config import Settings
 from .discovery import Discovery
 from .indexer import Indexer
@@ -38,6 +39,7 @@ class Node:
                 interfaces=settings.interfaces,
             )
         self._files_cache: tuple[int, bytes, str] | None = None
+        self._common_cache: tuple[tuple[int, int], bytes, str] | None = None
 
     @property
     def peer_id(self) -> str:
@@ -80,6 +82,27 @@ class Node:
         ).encode("utf-8")
         etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
         self._files_cache = (snap.version, body, etag)
+        return body, etag
+
+    def common_payload(self) -> tuple[bytes, str]:
+        """The merged Common Space as JSON plus an ETag, recomputed only when something changed."""
+        key = (self.indexer.snapshot.version, self.peers.version)
+        cached = self._common_cache
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        online = self.peers.online()
+        files = merge_common_space(self.peer_id, self.name, self.indexer.snapshot.entries, online)
+        body = json.dumps(
+            {
+                "self": {"peer_id": self.peer_id, "name": self.name},
+                "peers_online": len(online),
+                "indexing_pending": self.indexer.snapshot.pending,
+                "files": files,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+        self._common_cache = (key, body, etag)
         return body, etag
 
     def status(self) -> dict:
