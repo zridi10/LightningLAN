@@ -81,6 +81,7 @@ class PeerProcess:
             "--config", str(self.config),
             "--refresh-interval", str(self.refresh_interval),
             "--no-browser",
+            "--no-tray",
         ]
         if self.passphrase:
             cmd += ["--passphrase", self.passphrase]

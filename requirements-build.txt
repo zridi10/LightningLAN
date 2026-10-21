@@ -1,0 +1,2 @@
+# Building the desktop app (python build.py). Install together with requirements.txt.
+pyinstaller>=6.10,<7

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -13,15 +14,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.requests import ClientDisconnect
 
-from .desktop import open_in_file_manager
-from .node import Node
+from .desktop import FolderPickerError, open_in_file_manager, pick_folder
+from .logs import log_dir
+from .node import Node, SettingsError
+from .resources import static_dir
 from .security import AccessControlMiddleware, SecurityHeadersMiddleware
 from .serving import serve_download
 from .transfers import DownloadError
 from .uploads import receive_upload
 
+log = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = static_dir()
 
 
 class StartDownload(BaseModel):
@@ -30,8 +34,22 @@ class StartDownload(BaseModel):
 
 
 class OpenTarget(BaseModel):
-    target: Literal["share", "downloads", "download"]
+    target: Literal["share", "downloads", "download", "logs"]
     download_id: str | None = None
+
+
+class SettingsUpdate(BaseModel):
+    """Fields left out (or null) stay as they are. An empty passphrase turns it off."""
+
+    name: str | None = None
+    share_dir: str | None = None
+    downloads_dir: str | None = None
+    passphrase: str | None = None
+
+
+class PickFolder(BaseModel):
+    purpose: Literal["share", "downloads"]
+    initial: str | None = None
 
 
 def etag_matches(if_none_match: str | None, etag: str) -> bool:
@@ -74,6 +92,7 @@ def create_app(node: Node) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
+        log.info("web UI opened in a browser")
         return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -139,12 +158,38 @@ def create_app(node: Node) -> FastAPI:
             raise HTTPException(exc.status, str(exc)) from exc
         return {"ok": True}
 
+    @app.get("/api/settings")
+    def get_settings() -> dict:
+        return node.settings_payload()
+
+    @app.post("/api/settings")
+    async def update_settings(body: SettingsUpdate) -> dict:
+        try:
+            changed = await node.update_settings(**body.model_dump())
+        except SettingsError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"changed": changed, "settings": node.settings_payload()}
+
+    @app.post("/api/pick-folder")
+    def choose_folder(body: PickFolder) -> dict:
+        # Blocks (in a worker thread) until the person picks a folder or cancels.
+        title = "Choose the folder to share" if body.purpose == "share" else "Choose where downloads are saved"
+        initial = Path(body.initial) if body.initial and Path(body.initial).is_absolute() else None
+        try:
+            chosen = pick_folder(title, initial)
+        except FolderPickerError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"path": str(chosen) if chosen else None}
+
     @app.post("/api/open")
     def open_folder(body: OpenTarget) -> dict:
         if body.target == "share":
             path, reveal = node.settings.share_dir, False
         elif body.target == "downloads":
             path, reveal = node.settings.downloads_dir, False
+        elif body.target == "logs":
+            path, reveal = log_dir(node.settings.state_dir), False
+            path.mkdir(parents=True, exist_ok=True)
         else:
             try:
                 d = node.downloads.get(body.download_id or "")

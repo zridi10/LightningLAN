@@ -26,6 +26,9 @@
       <span id="peer-pill" class="pill pill-off" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="peer-count">0 peers online</span>
       </span>
+      <button id="settings-open" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg>
+      </button>
       <button id="theme-toggle" class="icon-btn" type="button" title="Theme: automatic" aria-label="Switch colour theme">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
       </button>
@@ -38,6 +41,17 @@
 
   <main class="layout">
     <section class="main-col">
+      <section id="welcome" class="card welcome" hidden>
+        <h2>Welcome to LanShare</h2>
+        <p>Files in your shared folder are visible to everyone on this network who runs LanShare.
+           Other computers show up here by themselves, and so do their files. Nothing to set up.</p>
+        <p class="muted small">Your shared folder: <code id="welcome-share"></code></p>
+        <div class="welcome-actions">
+          <button id="welcome-settings" class="btn secondary" type="button">Change folders or name</button>
+          <button id="welcome-dismiss" class="btn" type="button">Got it</button>
+        </div>
+      </section>
+
       <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
            aria-label="Add files to the Common Space: drop files here or press Enter to choose files">
         <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l5 5h-3v6h-4V8H7l5-5zM5 16h2v3h10v-3h2v5H5v-5z"/></svg>
@@ -104,6 +118,59 @@
       </section>
     </aside>
   </main>
+
+  <dialog id="settings" class="dialog" aria-labelledby="settings-title">
+    <form id="settings-form" novalidate>
+      <h2 id="settings-title">Settings</h2>
+
+      <div class="field">
+        <label class="field-label" for="set-name">Your name</label>
+        <input id="set-name" type="text" maxlength="64" autocomplete="off" spellcheck="false">
+        <span class="field-help">How this computer appears to others.</span>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="set-share">Shared folder</label>
+        <div class="field-row">
+          <input id="set-share" type="text" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn secondary" data-pick="set-share">Browse…</button>
+        </div>
+        <span class="field-help">Everything in this folder is visible to others on the network.</span>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="set-downloads">Downloads folder</label>
+        <div class="field-row">
+          <input id="set-downloads" type="text" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn secondary" data-pick="set-downloads">Browse…</button>
+        </div>
+        <span class="field-help">Where files you download are saved.</span>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="set-pass">Passphrase <span class="muted">(optional)</span></label>
+        <div class="field-row">
+          <input id="set-pass" type="password" autocomplete="off" spellcheck="false" maxlength="256">
+          <button id="set-pass-toggle" type="button" class="btn secondary">Show</button>
+        </div>
+        <span class="field-help">Only computers that use the same passphrase see each other. Leave it empty to share
+          with everyone on the network running LanShare.</span>
+      </div>
+
+      <p id="settings-error" class="form-error" role="alert" hidden></p>
+
+      <div class="settings-info small muted">
+        <div>Web address: <code id="set-url"></code></div>
+        <div>Settings file: <code id="set-config"></code></div>
+        <div>Problems? <button type="button" class="text-btn" data-open="logs">Open the log folder</button></div>
+      </div>
+
+      <div class="dialog-actions">
+        <button id="settings-cancel" type="button" class="btn secondary">Cancel</button>
+        <button id="settings-save" type="submit" class="btn">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
   <div id="drag-overlay" class="drag-overlay" hidden><div>Drop to add to the Common Space</div></div>

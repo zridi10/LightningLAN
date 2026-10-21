@@ -1,24 +1,43 @@
-"""Command-line entry point: python -m lanshare --share <folder> ..."""
+"""Entry point for `python -m lanshare` and for the packaged desktop app.
+
+With no arguments it runs zero-config: default folders, the computer's name, port 8765 (or the
+next free one), a tray icon, and the web UI opened in the browser. Launching it again while it
+runs just opens the web UI of the running copy.
+"""
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
+import signal
 import socket
 import sys
 import threading
 import time
-import webbrowser
 from pathlib import Path
 
 import uvicorn
 
 from . import __version__
-from .config import ConfigError, Settings, load_settings
+from .config import ConfigError, Settings, default_config_path, load_settings
+from .desktop import open_url, restore_library_path, show_message
+from .instance import InstanceLock, running_instance_url
+from .logs import add_file_logging, log_dir, log_uncaught_exceptions, setup_console_logging
 from .node import Node
+from .resources import is_frozen
 from .server import create_app
 
 log = logging.getLogger("lanshare")
+
+PORT_SEARCH_RANGE = 20  # without --port, try this many ports from the remembered one
+FILE_ONLY = {"file_only": True}
+
+
+class Fatal(Exception):
+    def __init__(self, message: str, exit_code: int):
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,8 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--share", metavar="FOLDER", help="folder to share (remembered for next time)")
     p.add_argument("--downloads", metavar="FOLDER", help="where downloads are saved (remembered)")
-    p.add_argument("--port", type=int, help="HTTP port (default 8765, remembered)")
-    p.add_argument("--name", help="display name shown to other peers (default: hostname, remembered)")
+    p.add_argument("--port", type=int, help="HTTP port (default 8765 or the next free one; remembered)")
+    p.add_argument("--name", help="display name shown to other peers (default: computer name, remembered)")
     p.add_argument("--passphrase", help="shared secret; only peers with the same passphrase are seen")
     p.add_argument("--config", metavar="FILE", type=Path, help="config file location")
     p.add_argument(
@@ -52,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="limit how fast each peer can download from you, in megabytes per second",
     )
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
+    p.add_argument("--no-tray", action="store_true", help="no tray icon and no pop-up messages (servers, scripts)")
     p.add_argument("--verbose", "-v", action="store_true", help="log requests and debug output")
     p.add_argument("--version", action="version", version=f"LanShare {__version__}")
     return p
@@ -66,11 +86,27 @@ def bind_socket(port: int) -> socket.socket:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind(("0.0.0.0", port))
+        # Listen right away: on Linux two SO_REUSEADDR sockets can both bind a port that nobody
+        # listens on yet, and the loser would only find out later, when the server starts.
+        sock.listen(128)
     except OSError:
         sock.close()
         raise
     sock.set_inheritable(True)
     return sock
+
+
+def bind_first_free(preferred: int, explicit: bool) -> socket.socket:
+    """Bind `preferred`; unless that port was asked for explicitly, fall back to the next free ones."""
+    last_error: OSError | None = None
+    candidates = [preferred] if explicit else range(preferred, min(preferred + PORT_SEARCH_RANGE, 65536))
+    for port in candidates:
+        try:
+            return bind_socket(port)
+        except OSError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
 
 
 def settings_from_args(args: argparse.Namespace) -> Settings:
@@ -96,11 +132,12 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
 
 def print_banner(settings: Settings, addresses: list[str]) -> None:
     url = f"http://localhost:{settings.port}"
+    lan = ", ".join(f"{ip}:{settings.port}" for ip in addresses) or "discovery off"
     lines = [
         "",
         f"  LanShare {__version__} is running as \"{settings.name}\"",
         f"  Web UI:     {url}",
-        f"  LAN:        {', '.join(f'{ip}:{settings.port}' for ip in addresses) or 'discovery off'}",
+        f"  LAN:        {lan}",
         f"  Sharing:    {settings.share_dir}",
         f"  Downloads:  {settings.downloads_dir}",
         f"  Passphrase: {'on' if settings.passphrase else 'off'}",
@@ -109,9 +146,14 @@ def print_banner(settings: Settings, addresses: list[str]) -> None:
         "",
     ]
     print("\n".join(lines), flush=True)
+    log.info(
+        "LanShare %s running as %r: web UI %s, LAN %s, sharing %s, downloads %s, passphrase %s",
+        __version__, settings.name, url, lan, settings.share_dir, settings.downloads_dir,
+        "on" if settings.passphrase else "off", extra=FILE_ONLY,
+    )
 
 
-def _after_start(server: uvicorn.Server, node: Node) -> None:
+def _after_start(server: uvicorn.Server, node: Node, url: str) -> None:
     settings = node.settings
     while not server.started:
         if server.should_exit:
@@ -119,48 +161,168 @@ def _after_start(server: uvicorn.Server, node: Node) -> None:
         time.sleep(0.05)
     print_banner(settings, node.discovery.addresses if node.discovery else [])
     if settings.open_browser:
-        webbrowser.open(f"http://localhost:{settings.port}")
+        if open_url(url):
+            log.info("opened %s in the default browser", url, extra=FILE_ONLY)
+        else:
+            log.warning("could not open a browser; open %s yourself", url)
+
+
+# ----- running -------------------------------------------------------------------------------
+
+def _gui_mode(args: argparse.Namespace) -> bool:
+    """A packaged app started from the desktop: report problems in pop-ups, not on a console."""
+    stderr = sys.stderr
+    has_terminal = stderr is not None and hasattr(stderr, "isatty") and stderr.isatty()
+    return is_frozen() and not args.no_tray and not has_terminal
+
+
+def _prepare_streams() -> None:
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:  # a windowed app on Windows has no console at all
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+        elif hasattr(stream, "reconfigure"):
+            # Redirected output on Windows uses the ANSI code page; never crash on a peer's name.
+            stream.reconfigure(errors="backslashreplace")
+
+
+def _report_error(message: str, gui: bool) -> None:
+    print(f"error: {message}", file=sys.stderr, flush=True)
+    log.error("%s", message, extra=FILE_ONLY)
+    if gui:
+        show_message("LanShare", message)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    for stream in (sys.stdout, sys.stderr):
-        # Redirected output on Windows uses the ANSI code page; never crash on a peer's name.
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(errors="backslashreplace")
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    if not args.verbose:
-        for noisy in ("httpx", "httpcore", "zeroconf"):
-            logging.getLogger(noisy).setLevel(logging.WARNING)
+    gui = _gui_mode(args)
+    setup_console_logging(args.verbose)
+    _prepare_streams()
+    restore_library_path()
+    log_uncaught_exceptions()
     try:
-        settings = settings_from_args(args)
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+        return _run(args, gui)
+    except Fatal as exc:
+        _report_error(str(exc), gui)
+        return exc.exit_code
 
+
+def _run(args: argparse.Namespace, gui: bool) -> int:
+    config_path = args.config.expanduser().absolute() if args.config else default_config_path()
+    state_dir = config_path.parent
+    lock = InstanceLock(state_dir)
     try:
-        sock = bind_socket(settings.port)
+        acquired = lock.acquire()
     except OSError as exc:
-        print(
-            f"error: cannot listen on port {settings.port} ({exc.strerror or exc}).\n"
-            f"Is LanShare already running? Use --port to pick another port.",
-            file=sys.stderr,
-        )
-        return 1
+        raise Fatal(f"cannot use the settings folder {state_dir}: {exc.strerror or exc}", 2) from exc
+    if not acquired:
+        return _hand_over(state_dir, args)
+    try:
+        add_file_logging(state_dir)
+        try:
+            settings = settings_from_args(args)
+        except ConfigError as exc:
+            raise Fatal(str(exc), 2) from exc
+        try:
+            sock = bind_first_free(settings.port, explicit=args.port is not None)
+        except OSError as exc:
+            raise Fatal(
+                f"cannot listen on port {settings.port} ({exc.strerror or exc}).\n"
+                f"Is LanShare already running? Use --port to pick another port.",
+                1,
+            ) from exc
+        settings.port = sock.getsockname()[1]
+        lock.publish(settings.port, settings.peer_id)
+        _serve(settings, sock, args)
+        log.info("LanShare stopped", extra=FILE_ONLY)
+        return 0
+    finally:
+        lock.release()
 
+
+def _hand_over(state_dir: Path, args: argparse.Namespace) -> int:
+    """Another copy is running with this config: show its web UI instead of starting a second one."""
+    url = running_instance_url(state_dir)
+    if url is None:
+        raise Fatal(
+            "LanShare is already running but is not responding. Wait a moment and try again, "
+            "or quit it from its tray icon.",
+            1,
+        )
+    print(f"LanShare is already running: {url}", flush=True)
+    if not args.no_browser:
+        open_url(url)
+    return 0
+
+
+def _serve(settings: Settings, sock: socket.socket, args: argparse.Namespace) -> None:
     node = Node(settings)
     app = create_app(node)
     config = uvicorn.Config(
         app,
+        log_config=None,  # use our logging setup (console and file)
         log_level="debug" if args.verbose else "warning",
         access_log=args.verbose,
         timeout_graceful_shutdown=3,
     )
     server = uvicorn.Server(config)
-    app.state.request_shutdown = lambda: setattr(server, "should_exit", True)
-    threading.Thread(target=_after_start, args=(server, node), daemon=True).start()
-    server.run(sockets=[sock])
-    return 0
+
+    def request_shutdown() -> None:
+        server.should_exit = True
+
+    app.state.request_shutdown = request_shutdown
+    url = f"http://localhost:{settings.port}"
+    tray = None if args.no_tray else _make_tray(node, url, request_shutdown)
+    threading.Thread(target=_after_start, args=(server, node, url), daemon=True).start()
+    if tray is None:
+        server.run(sockets=[sock])
+    elif sys.platform == "darwin":
+        _serve_with_tray_on_main_thread(server, sock, tray)
+    else:
+        tray.start()
+        try:
+            server.run(sockets=[sock])
+        finally:
+            tray.stop()
+
+
+def _make_tray(node: Node, url: str, request_shutdown):
+    from .tray import Tray, tray_supported
+
+    if not tray_supported():
+        log.info("no desktop session: running without a tray icon")
+        return None
+    try:
+        return Tray(node, url, log_dir(node.settings.state_dir), request_shutdown)
+    except Exception:
+        log.warning("the tray icon is not available; use the web UI instead", exc_info=True)
+        return None
+
+
+def _serve_with_tray_on_main_thread(server: uvicorn.Server, sock: socket.socket, tray) -> None:
+    """macOS: the menu bar icon must own the main thread, so the web server runs on another one."""
+    signals = {signal.SIGINT, signal.SIGTERM}
+    signal.pthread_sigmask(signal.SIG_BLOCK, signals)  # threads started below inherit this mask
+    tray_done = threading.Event()
+
+    def stop_on_signal() -> None:
+        signal.sigwait(signals)
+        server.should_exit = True
+
+    def stop_tray_when_server_ends() -> None:
+        server_thread.join()
+        while not tray_done.is_set():
+            tray.stop()
+            tray_done.wait(1.0)
+
+    server_thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, name="lanshare-server")
+    threading.Thread(target=stop_on_signal, name="lanshare-signals", daemon=True).start()
+    server_thread.start()
+    threading.Thread(target=stop_tray_when_server_ends, name="lanshare-tray-stop", daemon=True).start()
+    try:
+        tray.run()
+    except Exception:
+        log.warning("the menu bar icon is not available; use the web UI instead", exc_info=True)
+    finally:
+        tray_done.set()
+    server_thread.join()

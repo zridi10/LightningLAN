@@ -64,6 +64,7 @@ class Download:
     file_id: str
     name: str
     size: int
+    directory: Path  # the downloads folder when this download started; it finishes there
     preferred_peer: str | None = None
     status: str = QUEUED
     received: int = 0
@@ -99,8 +100,7 @@ class Download:
 
 class DownloadManager:
     def __init__(self, downloads_dir: Path, auth: Authenticator, peers: PeerTable):
-        self.downloads_dir = downloads_dir
-        self.partial_dir = downloads_dir / PARTIAL_DIR_NAME
+        self.downloads_dir = downloads_dir  # where new downloads go
         self.auth = auth
         self.peers = peers
         self._downloads: dict[str, Download] = {}
@@ -141,7 +141,8 @@ class DownloadManager:
                     self._launch(d)
                     return d
             remote = next((f for p, f in sources if p.peer_id == peer_id), sources[0][1])
-            d = Download(uuid.uuid4().hex[:12], file_id, remote.name, remote.size, preferred_peer=peer_id)
+            d = Download(uuid.uuid4().hex[:12], file_id, remote.name, remote.size, self.downloads_dir,
+                         preferred_peer=peer_id)
             self._downloads[d.id] = d
             self._launch(d)
         return d
@@ -227,7 +228,7 @@ class DownloadManager:
             thread.join(timeout=10)
 
     def _partial_path(self, d: Download) -> Path:
-        return self.partial_dir / f"{d.file_id}.part"
+        return d.directory / PARTIAL_DIR_NAME / f"{d.file_id}.part"
 
     def _discard_partial(self, d: Download) -> None:
         with self._lock:
@@ -247,7 +248,7 @@ class DownloadManager:
         corrupt_from: list[str] = []
         last_error = "No online peer has this file."
         try:
-            self.partial_dir.mkdir(parents=True, exist_ok=True)
+            part.parent.mkdir(parents=True, exist_ok=True)
             while True:
                 peer = self._pick_source(d, tried)
                 if peer is None:
@@ -316,7 +317,7 @@ class DownloadManager:
         if offset > d.size:
             part.unlink()
             offset = 0
-        free = free_space(self.downloads_dir)
+        free = free_space(d.directory)
         if free is not None and free < d.size - offset:
             raise _SourceFailed(f"Not enough disk space: {format_size(d.size - offset)} needed, {format_size(free)} free.")
         d.status = DOWNLOADING
@@ -401,7 +402,7 @@ class DownloadManager:
         return digest.hexdigest() == d.file_id
 
     def _finish(self, d: Download, part: Path) -> None:
-        final = move_without_overwrite(part, self.downloads_dir, safe_local_filename(d.name))
+        final = move_without_overwrite(part, d.directory, safe_local_filename(d.name))
         d.path = str(final)
         d.status = COMPLETED
         d.error = d.note = None

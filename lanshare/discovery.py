@@ -125,6 +125,22 @@ class Discovery:
             await self._azc.async_close()
             self._azc = None
 
+    async def update(self, name: str | None = None, auth_enabled: bool | None = None) -> None:
+        """Re-announce with a new display name or passphrase flag."""
+        if name is not None:
+            self.name = name
+        if auth_enabled is not None:
+            self.auth_enabled = auth_enabled
+        if self._azc is None or self._info is None:
+            return
+        if self._registration is not None and not self._registration.done():
+            await asyncio.wait({self._registration})
+        self._info = self._build_info()  # same instance name (it contains the peer ID)
+        try:
+            await self._azc.async_update_service(self._info)
+        except Exception:
+            log.exception("could not update the mDNS announcement")
+
     # ----- internals --------------------------------------------------------------------
 
     def _build_info(self) -> AsyncServiceInfo:

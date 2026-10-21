@@ -180,3 +180,23 @@ def test_background_thread_picks_up_new_files(tmp_path):
         assert names(idx) == ["a.txt", "b.txt"]
     finally:
         idx.stop()
+
+
+def test_switching_the_shared_folder(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "a.txt").write_bytes(b"from the first folder")
+    (second / "b.txt").write_bytes(b"from the second folder")
+    idx = Indexer(first)
+    idx.scan()
+    assert [e.relpath for e in idx.snapshot.entries] == ["a.txt"]
+    version = idx.snapshot.version
+
+    idx.set_root(second)
+    assert idx.snapshot.entries == ()  # emptied at once, before the new folder is scanned
+    assert idx.snapshot.version > version
+    assert idx.lookup(sha(b"from the first folder")) is None
+    idx.scan()
+    assert [e.relpath for e in idx.snapshot.entries] == ["b.txt"]
+    assert idx.root == second.resolve()

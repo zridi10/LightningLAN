@@ -15,8 +15,14 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
   file takes over.
 - Optional shared passphrase: peers without it can't see or download anything.
 - Light and dark mode, sortable and filterable file list, progress bars and clear errors.
+- Zero setup: default folders and name, a free port, a tray / menu bar icon, and a Settings
+  panel in the web page for everything else.
 
-## Requirements
+**Just want to use it?** Download the app for Windows or Linux from the
+[latest release](https://github.com/zridi10/LanShare/releases/latest) and follow [INSTALL.md](INSTALL.md). No Python needed. The rest of this README
+is about running from source, building the app and publishing releases.
+
+## Requirements (running from source)
 
 - Python 3.11 or newer ([python.org](https://www.python.org/downloads/); on Windows tick
   "Add python.exe to PATH").
@@ -27,7 +33,9 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
 
 The launch scripts create a virtual environment in `.venv`, install `requirements.txt` (only
 on the first run and when it changes) and start LanShare. Your browser then opens
-<http://localhost:8765>.
+<http://localhost:8765>, and a lightning-bolt icon appears in the system tray (menu bar on
+macOS). With no arguments, the first run uses `~/LanShare/Shared` and `~/LanShare/Downloads`
+and the computer's name. You can change these later in the web page's Settings panel.
 
 **Windows:** double-click `run.bat`, or from a terminal:
 
@@ -70,7 +78,7 @@ and downloads folders, then opens the UI in your default browser.
 | --- | --- |
 | `--share FOLDER` | Folder to share. Default `~/LanShare/Shared`. |
 | `--downloads FOLDER` | Where downloads are saved. Default `~/LanShare/Downloads`. It is kept separate from the shared folder unless you point both at the same place. |
-| `--port PORT` | HTTP port for the UI and for other peers. Default `8765`. |
+| `--port PORT` | HTTP port for the UI and for other peers. Default `8765`. If that port is taken, the next free one is used, unless you gave `--port`. |
 | `--name NAME` | Name other peers see. Default: the computer's hostname. |
 | `--passphrase TEXT` | Shared secret. Only peers using the same passphrase are visible (see [Security](#security)). |
 | `--config FILE` | Use a different config file (for example, to run two peers on one computer). |
@@ -78,12 +86,14 @@ and downloads folders, then opens the UI in your default browser.
 | `--refresh-interval SECONDS` | How often peers are polled for changes. Default `3`. |
 | `--max-upload-rate MB_PER_S` | Limit how fast each peer can download from you. Default: unlimited. |
 | `--no-browser` | Don't open the browser on start. |
+| `--no-tray` | No tray icon and no pop-up error messages, for servers and scripts. The tray is also skipped automatically when there is no desktop session. |
 | `-v`, `--verbose` | Log every request and debug messages. |
 
 `--share`, `--downloads`, `--port` and `--name` are **remembered** in the config file, so next
 time `run.bat` or `./run.sh` without arguments uses the same settings. A passphrase given on the
-command line is used for that run only and is never written to disk. To make it permanent, add
-`"passphrase": "..."` to the config file yourself.
+command line is used for that run only and is never written to disk. To make it permanent, set
+it in the web page's **Settings** panel, which saves the name, folders and passphrase to the
+config file. The file is readable only by your user account.
 
 The config file holds the peer's unique ID, which is generated on first run. It is stored in:
 
@@ -91,8 +101,18 @@ The config file holds the peer's unique ID, which is generated on first run. It 
 - macOS: `~/Library/Application Support/LanShare/config.json`
 - Linux: `$XDG_CONFIG_HOME/lanshare/config.json` (usually `~/.config/lanshare/config.json`)
 
-A `hash_cache.json` next to it remembers file hashes, so a file is only re-hashed when its size
-or modification time changes.
+Next to it:
+
+- `hash_cache.json` remembers file hashes, so a file is only re-hashed when its size or
+  modification time changes.
+- `logs/lanshare.log` is the log, rotated at 1 MB with 3 old copies kept. Open it from the tray
+  menu (**Open Log Folder**) or from Settings.
+- `lanshare.lock` and `instance.json` keep LanShare to one copy per config file. Starting it
+  again while it runs just opens the running copy's web page. `--config` with a different file
+  starts an independent peer.
+
+Nothing is ever written next to the program itself, so the packaged app runs from read-only
+locations too.
 
 ## Using it
 
@@ -112,6 +132,13 @@ or modification time changes.
   from where it stopped once the peer (or another peer with the same file) is back.
 - **Peers**: everyone online with their file counts. Peers that were found but rejected (for
   example, a different passphrase) are listed separately with the reason.
+- **Settings** (the gear icon): your name, the shared and downloads folders (with a
+  **Browse…** button that opens the system's folder chooser) and the passphrase. Changes apply
+  immediately, without a restart. Peers see a new name within seconds. A new shared folder is
+  indexed from scratch. Downloads already started finish in the old downloads folder. After a
+  passphrase change, every peer is checked again.
+- **Tray / menu bar icon**: Open LanShare (also what clicking the icon does on Windows),
+  Open Shared Folder, Open Downloads Folder, Open Log Folder, Quit LanShare.
 - **Stop LanShare** (in the *Your shared folder* card) shuts this peer down. Ctrl+C in the
   terminal does the same.
 
@@ -130,9 +157,11 @@ LanShare needs two kinds of traffic between the computers:
 ### Windows (Defender Firewall)
 
 On first start Windows shows *"Windows Defender Firewall has blocked some features of
-Python"*. Tick **Private networks** and click **Allow access**. The prompt names `python.exe`
-because LanShare runs inside Python. If you use the venv, the program allowed is the Python
-installation the venv was created from.
+Python"* (or *"of LanShare"* for the packaged `LanShare.exe`). Tick **Private networks** and
+click **Allow access**. When running from source, the prompt names `python.exe` because
+LanShare runs inside Python. If you use the venv, the program allowed is the Python
+installation the venv was created from. For the packaged app the rule belongs to that copy of
+`LanShare.exe`, so moving the file brings the prompt back.
 
 If you clicked Cancel, or other computers still can't see you:
 
@@ -205,8 +234,11 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
   network and the network is Private on Windows, that no VPN is capturing traffic, and that the
   passphrases match (a mismatch is listed under *Not connected* in the Peers card). Guest Wi-Fi
   often isolates clients from each other.
-- **"cannot listen on port 8765"**: LanShare is already running, or another program uses the
-  port. Start with `--port 8766`, which is then remembered.
+- **"cannot listen on port 8765"** only happens with an explicit `--port`. Another program
+  uses that port, so pick another one. Without `--port`, LanShare moves to the next free port
+  by itself.
+- **Something else went wrong**: check `logs/lanshare.log` in the config folder (tray menu →
+  **Open Log Folder**).
 - **A peer stays listed briefly after its computer disappears.** Peers that quit normally
   vanish immediately. A computer that drops off the network is removed after 3 failed checks,
   typically 10–20 seconds.
@@ -226,11 +258,61 @@ disk space for the temp folder. Temp files are deleted as each test passes. On a
 no network connection, use loopback for discovery: `LANSHARE_TEST_INTERFACE=127.0.0.1`.
 Run `pytest -m "not integration"` for the fast unit tests only.
 
+## Building the desktop app
+
+`build.py` packages LanShare with PyInstaller for the OS it runs on:
+
+```bash
+python build.py               # Windows: py build.py
+python build.py --smoke-test  # also start the result and check the UI, indexing and shutdown
+```
+
+| OS | Result |
+| --- | --- |
+| Windows | `dist/LanShare.exe`, one file with no console window, an icon and version information |
+| macOS | `dist/LanShare-macOS.zip`, containing `LanShare.app`, a menu bar app with no Dock icon |
+| Linux | `dist/LanShare-linux-x86_64`, one file |
+
+If the Python running `build.py` lacks the requirements, it creates or reuses `.venv` and
+installs `requirements.txt` and `requirements-build.txt` there. The PyInstaller settings are in
+`packaging/lanshare.spec`. The web UI files are bundled inside the app and found through
+`lanshare/resources.py`. You can only build for the OS you are on. The release workflow builds
+all three.
+
+The macOS build targets Apple silicon only (arm64): several dependencies publish separate Intel
+and Apple wheels rather than universal2 ones, so a universal2 build isn't practical. The Linux
+binary runs on the glibc version it was built with or newer. CI builds it on Ubuntu 22.04
+(glibc 2.35).
+
+## Publishing a release
+
+`.github/workflows/release.yml` builds on native Windows and Linux runners, runs the unit tests
+and the smoke test on each, and attaches `LanShare.exe`, `LanShare-linux-x86_64` and
+`SHA256SUMS.txt` to a GitHub Release. A macOS entry is in the workflow but commented out
+until the Mac app has been tested on a Mac.
+
+1. Set `__version__` in `lanshare/__init__.py` (for example `1.0.0`) and commit.
+2. Tag and push: `git tag v1.0.0 && git push origin v1.0.0`. The workflow fails early if the tag
+   and `__version__` differ.
+
+To try the builds without releasing, run the workflow from the Actions tab (**Run workflow**).
+The files are then attached to the run as artifacts. The apps are not code-signed.
+[INSTALL.md](INSTALL.md) walks users through the SmartScreen warning.
+
 ## Project layout
 
 ```
+build.py         builds the desktop app with PyInstaller
+packaging/       PyInstaller spec and entry script
+.github/         release workflow (builds and publishes on tag push)
 lanshare/
-  cli.py         command line, startup banner, browser launch
+  cli.py         entry point: single instance, port choice, startup banner, browser, tray
+  tray.py        system tray / menu bar icon (pystray)
+  desktop.py     file manager, browser, message boxes, folder chooser
+  instance.py    one running copy per config folder
+  logs.py        console and log file setup
+  icon.py        the app icon, drawn with Pillow
+  resources.py   locating bundled files (source checkout or PyInstaller app)
   config.py      config file, peer ID, remembered settings
   node.py        wires the parts of a running peer together
   server.py      HTTP routes (FastAPI)
@@ -262,3 +344,13 @@ tests/           unit tests and a multi-process integration harness
   junctions are never followed.
 - `--max-upload-rate` applies to each transfer separately, not to the total.
 - Files with the same name but different content show up as separate rows.
+- The packaged apps are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn on
+  first launch (see [INSTALL.md](INSTALL.md)). Antivirus programs sometimes flag one-file
+  PyInstaller executables by mistake.
+- There is no macOS download yet. `build.py` can build an Apple silicon app on a Mac, but it
+  hasn't been tested there. On a Mac, run from source.
+- On Linux the tray icon uses the classic X11 system tray. It shows on KDE, Xfce, Cinnamon and
+  MATE, and on GNOME with the AppIndicator extension. Clicking it opens the web page; it has no
+  menu there. Without a tray, run the binary again or open <http://localhost:8765>.
+- LanShare does not add itself to login items. [INSTALL.md](INSTALL.md) shows how to do it by
+  hand.

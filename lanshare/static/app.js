@@ -138,6 +138,119 @@
     var summary = plural(s.shared_files, 'file') + ' shared';
     if (s.indexing_pending) summary += ' · indexing ' + plural(s.indexing_pending, 'file') + '…';
     $('share-summary').textContent = summary;
+    $('welcome').hidden = !(s.first_run && !welcomeDismissed());
+    $('welcome-share').textContent = s.share_dir;
+  }
+
+  // ----- first-run welcome ----------------------------------------------------------------
+
+  function welcomeDismissed() {
+    try { return localStorage.getItem('lanshare-welcome-dismissed') === '1'; } catch (e) { return false; }
+  }
+
+  function dismissWelcome() {
+    try { localStorage.setItem('lanshare-welcome-dismissed', '1'); } catch (e) { /* private mode */ }
+    $('welcome').hidden = true;
+  }
+
+  // ----- settings -------------------------------------------------------------------------
+
+  var loadedSettings = null;
+
+  function showSettingsError(message) {
+    $('settings-error').textContent = message || '';
+    $('settings-error').hidden = !message;
+  }
+
+  async function openSettings() {
+    try {
+      loadedSettings = await api('GET', '/api/settings');
+    } catch (e) {
+      toast('Could not load the settings: ' + e.message, 'error');
+      return;
+    }
+    var s = loadedSettings;
+    showSettingsError('');
+    $('set-name').value = s.name;
+    $('set-share').value = s.share_dir;
+    $('set-downloads').value = s.downloads_dir;
+    $('set-pass').value = s.passphrase;
+    $('set-pass').type = 'password';
+    $('set-pass-toggle').textContent = 'Show';
+    $('set-url').textContent = s.url;
+    $('set-config').textContent = s.config_path || '';
+    document.querySelectorAll('[data-pick]').forEach(function (b) { b.hidden = !s.can_pick_folder; });
+    var dialog = $('settings');
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+    $('set-name').focus();
+  }
+
+  function closeSettings() {
+    var dialog = $('settings');
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
+  async function saveSettings(e) {
+    e.preventDefault();
+    var s = loadedSettings || {};
+    var body = {};
+    var fields = { name: 'set-name', share_dir: 'set-share', downloads_dir: 'set-downloads' };
+    Object.keys(fields).forEach(function (key) {
+      var value = $(fields[key]).value.trim();
+      if (value !== s[key]) body[key] = value;
+    });
+    if ($('set-pass').value !== s.passphrase) body.passphrase = $('set-pass').value;
+    if (!Object.keys(body).length) { closeSettings(); return; }
+    var save = $('settings-save');
+    save.disabled = true;
+    showSettingsError('');
+    try {
+      var result = await api('POST', '/api/settings', body);
+      closeSettings();
+      var message = 'Settings saved.';
+      if (result.changed.indexOf('passphrase') !== -1) {
+        message += ' Peers now reconnect using the ' + (body.passphrase ? 'new' : 'removed') + ' passphrase.';
+      }
+      if (result.changed.indexOf('share_dir') !== -1) message += ' Indexing the new shared folder…';
+      toast(message, 'ok');
+      state.filesEtag = null;
+      refreshStatus().catch(function () {});
+      refreshFiles().catch(function () {});
+      refreshPeers().catch(function () {});
+    } catch (err) {
+      showSettingsError(err.message);
+    } finally {
+      save.disabled = false;
+    }
+  }
+
+  async function pickFolder(button) {
+    var input = $(button.dataset.pick);
+    var label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Choose in the window that opened…';
+    showSettingsError('');
+    try {
+      var r = await api('POST', '/api/pick-folder', {
+        purpose: button.dataset.pick === 'set-share' ? 'share' : 'downloads',
+        initial: input.value.trim() || null
+      });
+      if (r.path) input.value = r.path;
+    } catch (e) {
+      showSettingsError(e.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+
+  function togglePassphrase() {
+    var input = $('set-pass');
+    var show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    $('set-pass-toggle').textContent = show ? 'Hide' : 'Show';
   }
 
   function renderPeerCount() {
@@ -710,6 +823,15 @@
   function init() {
     applyTheme(storedTheme());
     $('theme-toggle').addEventListener('click', cycleTheme);
+    $('settings-open').addEventListener('click', openSettings);
+    $('settings-cancel').addEventListener('click', closeSettings);
+    $('settings-form').addEventListener('submit', saveSettings);
+    $('set-pass-toggle').addEventListener('click', togglePassphrase);
+    document.querySelectorAll('[data-pick]').forEach(function (b) {
+      b.addEventListener('click', function () { pickFolder(b); });
+    });
+    $('welcome-dismiss').addEventListener('click', dismissWelcome);
+    $('welcome-settings').addEventListener('click', function () { dismissWelcome(); openSettings(); });
 
     document.querySelectorAll('#files th[data-sort] button').forEach(function (b) {
       b.addEventListener('click', function () { setSort(b.parentElement.dataset.sort); });

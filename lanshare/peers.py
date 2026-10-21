@@ -194,6 +194,18 @@ class PeerTable:
         if self._wake is not None:
             self._wake.set()
 
+    def credentials_changed(self) -> None:
+        """Our passphrase changed: check every peer again right away, including ignored ones."""
+        for peer in list(self._peers.values()):
+            if peer.state == IGNORED:
+                peer.state = PENDING
+                peer.ignore_reason = None
+                peer.failures = 0
+            peer.etag = None
+            peer.next_poll = 0.0
+        self.version += 1
+        self.wake()
+
     # ----- polling ----------------------------------------------------------------------
 
     async def _run(self) -> None:

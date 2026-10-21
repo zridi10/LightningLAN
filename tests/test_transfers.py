@@ -227,3 +227,24 @@ def test_start_without_sources(setup):
         mgr.start("e" * 64)
     with pytest.raises(DownloadError):
         mgr.start("../../etc/passwd")
+
+
+def test_changing_the_downloads_folder_affects_new_downloads_only(setup, tmp_path):
+    content = os.urandom(1024 * 1024)
+    mgr, fake, sha, downloads = setup(content)
+    fake.cut_after = 300_000
+    first = wait_done(mgr, mgr.start(sha).id)
+    assert first["status"] == FAILED
+    new_folder = tmp_path / "new downloads"
+    new_folder.mkdir()
+    mgr.downloads_dir = new_folder  # what the Settings panel does
+
+    fake.cut_after = None
+    resumed = wait_done(mgr, mgr.start(sha).id)  # the partial file is in the old folder: finish there
+    assert resumed["status"] == COMPLETED and resumed["resumed_from"] > 0
+    assert Path(resumed["path"]).parent == downloads
+
+    again = wait_done(mgr, mgr.start(sha).id)
+    assert again["id"] != resumed["id"]
+    assert Path(again["path"]).parent == new_folder
+    assert Path(again["path"]).read_bytes() == content

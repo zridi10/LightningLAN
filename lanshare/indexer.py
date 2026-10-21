@@ -91,8 +91,11 @@ class Indexer:
         self._snapshot = IndexSnapshot((), 0, 0)
         self._by_hash: dict[str, FileEntry] = {}
         self._scan_lock = threading.Lock()
+        self._publish_lock = threading.Lock()
+        self._generation = 0  # bumped by set_root(); results of older scans are dropped
         self._wake = threading.Event()
         self._stop = threading.Event()
+        self._abort = threading.Event()  # interrupts hashing (stop or set_root)
         self._thread: threading.Thread | None = None
 
     # ----- public API -------------------------------------------------------------------
@@ -110,11 +113,21 @@ class Indexer:
 
     def stop(self) -> None:
         self._stop.set()
+        self._abort.set()
         self._wake.set()
         if self._thread is not None:
             self._thread.join(timeout=10)
 
     def request_rescan(self) -> None:
+        self._wake.set()
+
+    def set_root(self, root: Path) -> None:
+        """Share a different folder: the index empties at once and the new folder is scanned."""
+        with self._publish_lock:
+            self._generation += 1
+            self.root = Path(root).resolve()
+            self._abort.set()
+            self._publish_locked({}, pending=0)
         self._wake.set()
 
     def scan(self) -> bool:
@@ -134,10 +147,14 @@ class Indexer:
             self._wake.clear()
 
     def _scan(self) -> bool:
+        with self._publish_lock:
+            generation, root = self._generation, self.root
+            if not self._stop.is_set():
+                self._abort.clear()
         entries: dict[str, FileEntry] = {}
         new_cache: dict[str, tuple[int, int, str]] = {}
         todo: list[tuple[str, Path, int, int]] = []
-        for rel, path, size, mtime_ns in self._walk():
+        for rel, path, size, mtime_ns in self._walk(root):
             key = str(path)
             cached = self._cache.get(key)
             if cached is not None and cached[0] == size and cached[1] == mtime_ns:
@@ -146,11 +163,11 @@ class Indexer:
             else:
                 todo.append((rel, path, size, mtime_ns))
 
-        changed = self._publish(entries, pending=len(todo))
+        changed = self._publish(entries, len(todo), generation)
         last_publish = time.monotonic()
         for i, (rel, path, size, mtime_ns) in enumerate(todo):
             try:
-                digest = sha256_file(path, self._stop)
+                digest = sha256_file(path, self._abort)
                 st = os.stat(path)
             except InterruptedError:
                 return changed
@@ -163,16 +180,24 @@ class Indexer:
             entries[rel] = FileEntry(rel, size, mtime_ns, digest)
             new_cache[str(path)] = (size, mtime_ns, digest)
             if time.monotonic() - last_publish > 0.5:
-                changed |= self._publish(entries, pending=len(todo) - i - 1)
+                changed |= self._publish(entries, len(todo) - i - 1, generation)
                 last_publish = time.monotonic()
-        changed |= self._publish(entries, pending=0)
+        changed |= self._publish(entries, 0, generation)
 
+        if generation != self._generation:
+            return changed  # the shared folder changed during this scan
         if new_cache != self._cache:
             self._cache = new_cache
             self._save_cache()
         return changed
 
-    def _publish(self, entries: dict[str, FileEntry], pending: int) -> bool:
+    def _publish(self, entries: dict[str, FileEntry], pending: int, generation: int) -> bool:
+        with self._publish_lock:
+            if generation != self._generation:
+                return False
+            return self._publish_locked(entries, pending)
+
+    def _publish_locked(self, entries: dict[str, FileEntry], pending: int) -> bool:
         ordered = tuple(sorted(entries.values(), key=lambda e: e.relpath.lower()))
         current = self._snapshot
         if ordered == current.entries and pending == current.pending:
@@ -189,13 +214,12 @@ class Indexer:
                 log.exception("index change callback failed")
         return True
 
-    def _walk(self) -> Iterator[tuple[str, Path, int, int]]:
+    def _walk(self, root: Path) -> Iterator[tuple[str, Path, int, int]]:
         """Yield (relpath, path, size, mtime_ns) for every shareable file under the root.
 
         Symlinked and junctioned directories are not entered. Symlinked files are included
         only if they resolve to a file inside the root.
         """
-        root = self.root
         stack: list[tuple[str, str]] = [(str(root), "")]
         while stack:
             dirpath, prefix = stack.pop()

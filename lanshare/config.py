@@ -62,6 +62,7 @@ class Settings:
     max_upload_rate: float | None = None  # bytes per second, per transfer
     discovery: bool = True
     open_browser: bool = True
+    first_run: bool = False  # no config file existed when this run started
 
     @property
     def state_dir(self) -> Path:
@@ -86,8 +87,39 @@ def read_config_file(path: Path) -> dict[str, Any]:
 def write_config_file(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    # Readable by this user only: the file can hold the passphrase.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with open(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=2) + "\n")
     os.replace(tmp, path)
+
+
+def update_config_file(path: Path, values: dict[str, Any]) -> None:
+    """Change some keys of the config file, keeping the rest. A value of None removes the key."""
+    data = read_config_file(path)
+    for key, value in values.items():
+        if value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    try:
+        write_config_file(path, data)
+    except OSError as exc:
+        raise ConfigError(f"cannot write config file {path}: {exc}") from exc
+
+
+def prepare_folder(folder: str | os.PathLike[str], label: str) -> Path:
+    """Make `folder` absolute and create it if needed. Raises ConfigError with a user-facing message."""
+    path = Path(folder).expanduser().absolute()
+    if path.exists() and not path.is_dir():
+        raise ConfigError(f"{label} folder {path} is not a directory")
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ConfigError(f"cannot create {label} folder {path}: {exc.strerror or exc}") from exc
+    if not path.is_dir():
+        raise ConfigError(f"{label} folder {path} is not a directory")
+    return path
 
 
 def load_settings(
@@ -106,7 +138,8 @@ def load_settings(
     remembered in the config file for next time; a passphrase given here is used for this run
     only and is never written to disk (put it in the config file to make it permanent).
     """
-    path = Path(config_path) if config_path else default_config_path()
+    path = Path(config_path).expanduser().absolute() if config_path else default_config_path()
+    first_run = not path.exists()
     data = read_config_file(path)
 
     peer_id = data.get("peer_id")
@@ -127,15 +160,8 @@ def load_settings(
         passphrase = stored if isinstance(stored, str) else None
     passphrase = passphrase or None
 
-    share_dir = share_dir.expanduser().absolute()
-    downloads_dir = downloads_dir.expanduser().absolute()
-    for label, folder in (("shared", share_dir), ("downloads", downloads_dir)):
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise ConfigError(f"cannot create {label} folder {folder}: {exc}") from exc
-        if not folder.is_dir():
-            raise ConfigError(f"{label} folder {folder} is not a directory")
+    share_dir = prepare_folder(share_dir, "shared")
+    downloads_dir = prepare_folder(downloads_dir, "downloads")
 
     settings = Settings(
         peer_id=peer_id,
@@ -145,6 +171,7 @@ def load_settings(
         port=resolved_port,
         passphrase=passphrase,
         config_path=path,
+        first_run=first_run,
     )
 
     if save:

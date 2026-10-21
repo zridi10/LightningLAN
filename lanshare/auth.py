@@ -52,6 +52,15 @@ class Authenticator:
         self._seen: dict[str, float] = {}
         self._lock = threading.Lock()
 
+    def set_key(self, key: bytes | None) -> None:
+        """Switch to another passphrase's key (from derive_key), or turn auth off with None."""
+        if key:
+            self._key = key
+            self.enabled = True
+        else:
+            self.enabled = False
+            self._key = b""
+
     def _mac(self, *fields: str) -> str:
         return hmac.new(self._key, "\n".join(fields).encode("utf-8"), hashlib.sha256).hexdigest()
 
