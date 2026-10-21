@@ -7,11 +7,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
+from starlette.requests import ClientDisconnect
 
 from .node import Node
 from .security import AccessControlMiddleware
 from .serving import serve_download
 from .transfers import DownloadError
+from .uploads import receive_upload
 
 
 class StartDownload(BaseModel):
@@ -71,6 +73,15 @@ def create_app(node: Node) -> FastAPI:
     @app.get("/api/peers")
     def peers() -> dict:
         return node.peers_payload()
+
+    @app.post("/api/upload", status_code=201)
+    async def upload(request: Request, name: str, mtime: float | None = None):
+        try:
+            result = await receive_upload(request, node.settings.share_dir, name, mtime)
+        except ClientDisconnect:
+            return Response(status_code=400)  # nobody is listening any more
+        node.indexer.request_rescan()
+        return result
 
     @app.get("/api/downloads")
     def list_downloads() -> dict:
