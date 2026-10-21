@@ -32,6 +32,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", help="display name shown to other peers (default: hostname)")
     p.add_argument("--passphrase", help="shared secret; only peers with the same passphrase are seen")
     p.add_argument("--config", metavar="FILE", type=Path, help="config file location")
+    p.add_argument(
+        "--interface",
+        action="append",
+        metavar="IP",
+        help="advertise only on this local IPv4 address (repeatable; default: auto-detect LAN)",
+    )
+    p.add_argument(
+        "--refresh-interval",
+        type=float,
+        default=3.0,
+        metavar="SECONDS",
+        help="how often peers are polled for changes (default 3)",
+    )
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
     p.add_argument("--verbose", "-v", action="store_true", help="log requests and debug output")
     p.add_argument("--version", action="version", version=f"LanShare {__version__}")
@@ -64,15 +77,20 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         passphrase=args.passphrase,
     )
     settings.open_browser = not args.no_browser
+    settings.interfaces = args.interface
+    if not 0.2 <= args.refresh_interval <= 60:
+        raise ConfigError("--refresh-interval must be between 0.2 and 60 seconds")
+    settings.refresh_interval = args.refresh_interval
     return settings
 
 
-def print_banner(settings: Settings) -> None:
+def print_banner(settings: Settings, addresses: list[str]) -> None:
     url = f"http://localhost:{settings.port}"
     lines = [
         "",
         f"  LanShare {__version__} is running as \"{settings.name}\"",
         f"  Web UI:     {url}",
+        f"  LAN:        {', '.join(f'{ip}:{settings.port}' for ip in addresses) or 'discovery off'}",
         f"  Sharing:    {settings.share_dir}",
         f"  Downloads:  {settings.downloads_dir}",
         f"  Passphrase: {'on' if settings.passphrase else 'off'}",
@@ -83,12 +101,13 @@ def print_banner(settings: Settings) -> None:
     print("\n".join(lines), flush=True)
 
 
-def _after_start(server: uvicorn.Server, settings: Settings) -> None:
+def _after_start(server: uvicorn.Server, node: Node) -> None:
+    settings = node.settings
     while not server.started:
         if server.should_exit:
             return
         time.sleep(0.05)
-    print_banner(settings)
+    print_banner(settings, node.discovery.addresses if node.discovery else [])
     if settings.open_browser:
         webbrowser.open(f"http://localhost:{settings.port}")
 
@@ -99,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if not args.verbose:
+        for noisy in ("httpx", "httpcore", "zeroconf"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         settings = settings_from_args(args)
     except ConfigError as exc:
@@ -125,6 +147,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     server = uvicorn.Server(config)
     app.state.request_shutdown = lambda: setattr(server, "should_exit", True)
-    threading.Thread(target=_after_start, args=(server, settings), daemon=True).start()
+    threading.Thread(target=_after_start, args=(server, node), daemon=True).start()
     server.run(sockets=[sock])
     return 0

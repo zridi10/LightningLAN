@@ -7,8 +7,11 @@ import json
 import logging
 
 from . import __version__
+from .auth import Authenticator
 from .config import Settings
+from .discovery import Discovery
 from .indexer import Indexer
+from .peers import PeerTable
 
 log = logging.getLogger(__name__)
 
@@ -16,10 +19,24 @@ log = logging.getLogger(__name__)
 class Node:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.auth = Authenticator(settings.passphrase, settings.peer_id)
         self.indexer = Indexer(
             settings.share_dir,
             cache_path=settings.state_dir / "hash_cache.json",
+            interval=max(1.0, min(5.0, settings.refresh_interval * 2)),
         )
+        self.peers = PeerTable(settings.peer_id, self.auth, settings.refresh_interval)
+        self.discovery: Discovery | None = None
+        if settings.discovery:
+            self.discovery = Discovery(
+                peer_id=settings.peer_id,
+                name=settings.name,
+                port=settings.port,
+                auth_enabled=self.auth.enabled,
+                on_found=self.peers.service_found,
+                on_lost=self.peers.service_lost,
+                interfaces=settings.interfaces,
+            )
         self._files_cache: tuple[int, bytes, str] | None = None
 
     @property
@@ -32,8 +49,17 @@ class Node:
 
     async def start(self) -> None:
         self.indexer.start()
+        await self.peers.start()
+        if self.discovery is not None:
+            await self.discovery.start()
 
     async def stop(self) -> None:
+        if self.discovery is not None:
+            try:
+                await self.discovery.stop()  # say goodbye before anything else goes away
+            except Exception:
+                log.exception("stopping discovery failed")
+        await self.peers.stop()
         self.indexer.stop()
 
     def files_payload(self) -> tuple[bytes, str]:
@@ -63,9 +89,17 @@ class Node:
             "name": self.name,
             "version": __version__,
             "port": self.settings.port,
+            "addresses": self.discovery.addresses if self.discovery else [],
             "share_dir": str(self.settings.share_dir),
             "downloads_dir": str(self.settings.downloads_dir),
-            "passphrase_enabled": bool(self.settings.passphrase),
+            "passphrase_enabled": self.auth.enabled,
             "shared_files": len(snap.entries),
             "indexing_pending": snap.pending,
+            "peers_online": len(self.peers.online()),
+        }
+
+    def peers_payload(self) -> dict:
+        return {
+            "peers": [p.to_dict() for p in self.peers.online()],
+            "ignored": [p.to_dict() for p in self.peers.ignored()],
         }

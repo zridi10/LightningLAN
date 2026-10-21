@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 
 from .node import Node
+from .security import AccessControlMiddleware
 
 
 def etag_matches(if_none_match: str | None, etag: str) -> bool:
@@ -27,6 +29,8 @@ def create_app(node: Node) -> FastAPI:
 
     app = FastAPI(title="LanShare", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.node = node
+    app.state.request_shutdown = None
+    app.add_middleware(AccessControlMiddleware, auth=node.auth)
 
     # ----- LAN-facing, read-only --------------------------------------------------------
 
@@ -43,5 +47,17 @@ def create_app(node: Node) -> FastAPI:
     @app.get("/api/status")
     def status() -> dict:
         return node.status()
+
+    @app.get("/api/peers")
+    def peers() -> dict:
+        return node.peers_payload()
+
+    @app.post("/api/shutdown")
+    async def shutdown(request: Request) -> dict:
+        stop = request.app.state.request_shutdown
+        if stop is None:
+            return {"ok": False, "detail": "shutdown is not available in this mode"}
+        asyncio.get_running_loop().call_later(0.2, stop)
+        return {"ok": True}
 
     return app

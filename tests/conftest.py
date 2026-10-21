@@ -72,3 +72,58 @@ def make_junction(target: Path, link: Path) -> None:
 
 
 windows_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only")
+
+
+# ----- integration fixtures (real peer processes) ------------------------------------------
+
+from .harness import PeerProcess, dump_logs  # noqa: E402
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, "rep_" + rep.when, rep)
+
+
+def stop_all(peers: list[PeerProcess]) -> None:
+    for p in peers:
+        if p.running:
+            try:
+                p.post("/api/shutdown", timeout=3)
+            except Exception:
+                p.kill()
+    for p in peers:
+        if p.proc is not None:
+            try:
+                p.proc.wait(timeout=15)
+            except Exception:
+                p.kill()
+
+
+@pytest.fixture
+def spawn(tmp_path, request):
+    """spawn("A", passphrase=..., start=True) -> a running PeerProcess, stopped after the test."""
+    peers: list[PeerProcess] = []
+
+    def _spawn(name: str, start: bool = True, **kwargs) -> PeerProcess:
+        p = PeerProcess(tmp_path, name, **kwargs)
+        peers.append(p)
+        if start:
+            p.start()
+        return p
+
+    def _spawn_many(*names: str, **kwargs) -> list[PeerProcess]:
+        started = [_spawn(name, start=False, **kwargs) for name in names]
+        for p in started:
+            p.start(wait=False)
+        for p in started:
+            p.wait_ready()
+        return started
+
+    _spawn.many = _spawn_many
+    yield _spawn
+    stop_all(peers)
+    rep = getattr(request.node, "rep_call", None)
+    if rep is not None and rep.failed:
+        print(dump_logs(peers))
