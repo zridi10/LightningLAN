@@ -7,7 +7,6 @@ other through real mDNS. Set LANSHARE_TEST_INTERFACE=127.0.0.1 to keep discovery
 
 from __future__ import annotations
 
-import json
 import os
 import socket
 import subprocess
@@ -175,10 +174,6 @@ class PeerProcess:
 
 def dump_logs(peers: list[PeerProcess]) -> str:
     return "\n".join(f"===== {p.name} =====\n{p.log_text()}" for p in peers)
-
-
-def pretty(obj: object) -> str:
-    return json.dumps(obj, indent=2)
 
 
 def start_together(*peers: PeerProcess) -> None:

@@ -41,6 +41,10 @@ ACTIVE_STATES = {QUEUED, DOWNLOADING, VERIFYING}
 class DownloadError(Exception):
     """A request to the download manager could not be carried out (message is user-facing)."""
 
+    def __init__(self, message: str, status: int = 404):
+        super().__init__(message)
+        self.status = status  # HTTP status the API should answer with
+
 
 class _Stop(Exception):
     pass
@@ -119,14 +123,23 @@ class DownloadManager:
 
     def start(self, file_id: str, peer_id: str | None = None) -> Download:
         if not isinstance(file_id, str) or not _SHA256_RE.match(file_id):
-            raise DownloadError("invalid file id")
+            raise DownloadError("invalid file id", 400)
         with self._lock:
-            for d in self._downloads.values():
-                if d.file_id == file_id and d.status in ACTIVE_STATES:
+            same_file = [d for d in self._downloads.values() if d.file_id == file_id]
+            for d in same_file:
+                if d.status in ACTIVE_STATES:
                     return d
             sources = self.sources(file_id)
             if not sources:
                 raise DownloadError("No online peer has this file.")
+            for d in same_file:
+                # Downloading a paused or failed file again resumes that entry and its partial data.
+                if d.status in (PAUSED, FAILED) and not self._is_running(d.id):
+                    d.error = d.note = None
+                    d.status = QUEUED
+                    d.preferred_peer = peer_id or d.preferred_peer
+                    self._launch(d)
+                    return d
             remote = next((f for p, f in sources if p.peer_id == peer_id), sources[0][1])
             d = Download(uuid.uuid4().hex[:12], file_id, remote.name, remote.size, preferred_peer=peer_id)
             self._downloads[d.id] = d
@@ -141,10 +154,12 @@ class DownloadManager:
 
     def resume(self, download_id: str) -> Download:
         d = self.get(download_id)
-        thread = self._threads.get(download_id)
-        if thread is not None and thread.is_alive():
-            raise DownloadError("the download is still stopping; try again in a moment")
+        if self._is_running(download_id):
+            raise DownloadError("the download is still stopping; try again in a moment", 409)
         with self._lock:
+            if any(o.id != d.id and o.file_id == d.file_id and o.status in ACTIVE_STATES
+                   for o in self._downloads.values()):
+                raise DownloadError("this file is already being downloaded", 409)
             if d.status in (PAUSED, FAILED):
                 d.error = d.note = None
                 d.status = QUEUED
@@ -163,7 +178,7 @@ class DownloadManager:
     def remove(self, download_id: str) -> None:
         d = self.get(download_id)
         if d.status in ACTIVE_STATES:
-            raise DownloadError("cancel or pause the download first")
+            raise DownloadError("cancel or pause the download first", 409)
         if d.status in (PAUSED, FAILED):
             self._discard_partial(d)
         with self._lock:
@@ -189,6 +204,10 @@ class DownloadManager:
         return result
 
     # ----- worker -----------------------------------------------------------------------
+
+    def _is_running(self, download_id: str) -> bool:
+        thread = self._threads.get(download_id)
+        return thread is not None and thread.is_alive()
 
     def _launch(self, d: Download) -> None:
         stop = threading.Event()
@@ -302,8 +321,8 @@ class DownloadManager:
             raise _SourceFailed(f"Not enough disk space: {format_size(d.size - offset)} needed, {format_size(free)} free.")
         d.status = DOWNLOADING
         d.received = offset
-        if offset and not d.resumed_from:
-            d.resumed_from = offset
+        if offset:
+            d.resumed_from = offset  # where the most recent resume picked up
         if offset >= d.size:
             return offset > 0
 
@@ -358,7 +377,7 @@ class DownloadManager:
             if offset:
                 f.seek(offset)
                 f.truncate()
-            for chunk in resp.iter_raw(CHUNK):
+            for chunk in resp.iter_raw():  # as it arrives: nothing is lost if the link drops
                 if stop.is_set():
                     raise _Stop()
                 if d.received + len(chunk) > d.size:

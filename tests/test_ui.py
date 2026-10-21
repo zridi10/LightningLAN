@@ -8,7 +8,7 @@ import pytest
 
 from lanshare.server import STATIC_DIR
 
-from .harness import common_files, get_download, start_together, wait_download, wait_for
+from .harness import common_files, start_together, wait_download, wait_for
 
 APP_JS = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 INDEX_HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -77,6 +77,13 @@ def test_open_endpoint_validates_its_input(peer):
     ui = {"X-LanShare-Client": "ui"}
     assert peer.post("/api/open", json={"target": "C:\\Windows"}, headers=ui).status_code == 422
     assert peer.post("/api/open", json={"target": "download", "download_id": "nope"}, headers=ui).status_code == 404
+
+
+def test_unknown_downloads_are_404(peer):
+    ui = {"X-LanShare-Client": "ui"}
+    assert peer.request("DELETE", "/api/downloads/nope", headers=ui).status_code == 404
+    assert peer.post("/api/downloads/nope/resume", headers=ui).status_code == 404
+    assert peer.post("/api/downloads", json={"file_id": "x"}, headers=ui).status_code == 400
 
 
 def test_api_responses_carry_hardening_headers_even_when_rejected(peer):

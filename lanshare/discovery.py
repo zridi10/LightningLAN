@@ -125,10 +125,6 @@ class Discovery:
             await self._azc.async_close()
             self._azc = None
 
-    async def refresh(self, service_name: str) -> None:
-        """Re-resolve a known service (used when a peer comes back after going quiet)."""
-        await self._resolve(service_name)
-
     # ----- internals --------------------------------------------------------------------
 
     def _build_info(self) -> AsyncServiceInfo:

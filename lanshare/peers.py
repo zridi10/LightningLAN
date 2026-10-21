@@ -13,8 +13,6 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Callable
-
 import httpx
 
 from .auth import REASONS, Authenticator
@@ -126,7 +124,6 @@ class PeerTable:
         self.auth = auth
         self.refresh_interval = refresh_interval
         self.version = 0  # bumps whenever the set of online peers or their files change
-        self.listeners: list[Callable[[Peer], None]] = []  # called when a peer goes offline
         self._peers: dict[str, Peer] = {}
         self._wake: asyncio.Event | None = None
         self._task: asyncio.Task | None = None
@@ -214,11 +211,6 @@ class PeerTable:
             except asyncio.TimeoutError:
                 pass
 
-    async def poll_now(self, peer_id: str) -> None:
-        peer = self._peers.get(peer_id)
-        if peer is not None:
-            await self._poll(peer)
-
     async def _poll(self, peer: Peer) -> None:
         error = "no address answered"
         for address in peer.candidate_addresses():
@@ -301,11 +293,6 @@ class PeerTable:
 
     def _went_offline(self, peer: Peer) -> None:
         self.version += 1
-        for listener in self.listeners:
-            try:
-                listener(peer)
-            except Exception:
-                log.exception("peer-offline listener failed")
 
 
 class _Ignored(Exception):

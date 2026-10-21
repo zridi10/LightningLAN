@@ -114,7 +114,7 @@ def create_app(node: Node) -> FastAPI:
         try:
             return node.downloads.start(body.file_id, body.peer_id).to_dict()
         except DownloadError as exc:
-            raise HTTPException(404, str(exc)) from exc
+            raise HTTPException(exc.status, str(exc)) from exc
 
     @app.post("/api/downloads/clear")
     def clear_downloads() -> dict:
@@ -129,14 +129,14 @@ def create_app(node: Node) -> FastAPI:
         try:
             return actions[action](download_id).to_dict()
         except DownloadError as exc:
-            raise HTTPException(409 if "still" in str(exc) else 404, str(exc)) from exc
+            raise HTTPException(exc.status, str(exc)) from exc
 
     @app.delete("/api/downloads/{download_id}")
     def remove_download(download_id: str) -> dict:
         try:
             node.downloads.remove(download_id)
         except DownloadError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            raise HTTPException(exc.status, str(exc)) from exc
         return {"ok": True}
 
     @app.post("/api/open")
@@ -149,7 +149,7 @@ def create_app(node: Node) -> FastAPI:
             try:
                 d = node.downloads.get(body.download_id or "")
             except DownloadError as exc:
-                raise HTTPException(404, str(exc)) from exc
+                raise HTTPException(exc.status, str(exc)) from exc
             if d.status != "completed" or not d.path or not Path(d.path).exists():
                 raise HTTPException(404, "The downloaded file is no longer there.")
             path, reveal = Path(d.path), True

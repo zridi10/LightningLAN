@@ -204,6 +204,21 @@ def test_connection_cut_mid_transfer_keeps_partial_and_resume_finishes(setup):
     assert Path(d["path"]).read_bytes() == content
 
 
+def test_starting_a_failed_download_again_resumes_the_same_entry(setup):
+    content = os.urandom(1024 * 1024)
+    mgr, fake, sha, downloads = setup(content)
+    fake.cut_after = 300_000
+    first = wait_done(mgr, mgr.start(sha).id)
+    assert first["status"] == FAILED
+    fake.cut_after = None
+    again = mgr.start(sha)  # the UI's Download button on the same file
+    assert again.id == first["id"], "must reuse the entry (and its partial file), not start a second one"
+    d = wait_done(mgr, again.id)
+    assert d["status"] == COMPLETED
+    assert d["resumed_from"] > 0
+    assert len(mgr.list()) == 1
+
+
 def test_start_without_sources(setup):
     from lanshare.transfers import DownloadError
 

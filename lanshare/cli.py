@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--share", metavar="FOLDER", help="folder to share (remembered for next time)")
     p.add_argument("--downloads", metavar="FOLDER", help="where downloads are saved (remembered)")
     p.add_argument("--port", type=int, help="HTTP port (default 8765, remembered)")
-    p.add_argument("--name", help="display name shown to other peers (default: hostname)")
+    p.add_argument("--name", help="display name shown to other peers (default: hostname, remembered)")
     p.add_argument("--passphrase", help="shared secret; only peers with the same passphrase are seen")
     p.add_argument("--config", metavar="FILE", type=Path, help="config file location")
     p.add_argument(
@@ -124,6 +124,10 @@ def _after_start(server: uvicorn.Server, node: Node) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):
+        # Redirected output on Windows uses the ANSI code page; never crash on a peer's name.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
