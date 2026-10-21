@@ -285,7 +285,7 @@ class PeerTable:
             self._went_offline(peer)
         elif peer.state == PENDING and peer.failures >= MAX_FAILURES:
             peer.state = OFFLINE
-        retry = OFFLINE_RETRY_INTERVAL if peer.state == OFFLINE else self.refresh_interval
+        retry = min(OFFLINE_RETRY_INTERVAL, 4 * self.refresh_interval) if peer.state == OFFLINE else self.refresh_interval
         peer.next_poll = time.monotonic() + retry
 
     def _ignore(self, peer: Peer, reason: str) -> None:
