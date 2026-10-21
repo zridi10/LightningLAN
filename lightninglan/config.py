@@ -59,7 +59,7 @@ class Settings:
     # Runtime-only options (never written to the config file).
     interfaces: list[str] | None = None
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
-    max_upload_rate: float | None = None  # bytes per second, per transfer
+    max_upload_rate: float | None = None  # bytes per second, all uploads together
     discovery: bool = True
     open_browser: bool = True
     first_run: bool = False  # no config file existed when this run started

@@ -24,7 +24,8 @@
     filter: '',
     knownPeers: null,
     downloadStatus: {},
-    stopped: false,
+    exited: false,  // LightningLAN quit (the page has nothing left to talk to)
+    session: null,
     failures: 0
   };
 
@@ -126,6 +127,10 @@
 
   async function refreshStatus() {
     state.status = await api('GET', '/api/status');
+    renderStatus();
+  }
+
+  function renderStatus() {
     var s = state.status;
     $('self-name').textContent = s.name;
     $('self-name').title = s.name;
@@ -140,6 +145,73 @@
     $('share-summary').textContent = summary;
     $('welcome').hidden = !(s.first_run && !welcomeDismissed());
     $('welcome-share').textContent = s.share_dir;
+    renderSharing();
+  }
+
+  // ----- Stop and Start -------------------------------------------------------------------
+
+  function isStopped() { return !!state.status && state.status.online === false; }
+
+  function renderSharing() {
+    var stopped = isStopped();
+    $('stopped-banner').hidden = !stopped || state.exited;
+    $('stop-sharing').hidden = stopped;
+    $('start-sharing').hidden = !stopped;
+    renderPeerCount();
+    renderPeers();
+  }
+
+  async function setSharing(on) {
+    if (!on && !window.confirm('Stop LightningLAN on this computer? Other peers will no longer see your files, ' +
+        'and your downloads pause until you press Start LightningLAN.')) return;
+    var buttons = [$('stop-sharing'), $('start-sharing'), $('banner-start')];
+    buttons.forEach(function (b) { b.disabled = true; });
+    try {
+      state.status = await api('POST', on ? '/api/start' : '/api/stop');
+      renderStatus();
+      toast(on ? 'LightningLAN is sharing again.' : 'LightningLAN is stopped.', on ? 'ok' : undefined);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      buttons.forEach(function (b) { b.disabled = false; });
+    }
+    refreshPeers().catch(function () {});
+    refreshFiles().catch(function () {});
+    scheduleDownloads(100);
+  }
+
+  async function quitApp() {
+    if (!window.confirm('Quit LightningLAN completely? To share again later, open LightningLAN again.')) return;
+    try { await api('POST', '/api/shutdown'); } catch (e) { /* it may already be gone */ }
+    state.exited = true;
+    if (state.session) state.session.close();
+    $('stopped-banner').hidden = true;
+    var banner = $('offline-banner');
+    banner.textContent = 'LightningLAN has quit. You can close this tab.';
+    banner.hidden = false;
+  }
+
+  // ----- the web UI session ---------------------------------------------------------------
+  // While the page is open, one tab keeps /api/ui-session open (a Web Lock picks which, so any
+  // number of tabs share one connection). When the last tab closes, LightningLAN stops sharing;
+  // opening the page again starts it again. The stream also says when Stop or Start was pressed.
+
+  function holdSession() {
+    function open() {
+      var source = state.session = new EventSource('/api/ui-session');
+      source.onmessage = function () {
+        if (state.exited) return;
+        refreshStatus().catch(function () {});
+        refreshPeers().catch(function () {});
+        scheduleDownloads(100);
+      };
+      return new Promise(function () {});  // keep the lock for as long as this tab is open
+    }
+    if (navigator.locks && typeof navigator.locks.request === 'function') {
+      navigator.locks.request('lightninglan-ui-session', open);
+    } else {
+      open();
+    }
   }
 
   // ----- first-run welcome ----------------------------------------------------------------
@@ -255,8 +327,8 @@
 
   function renderPeerCount() {
     var n = state.peers.length;
-    $('peer-count').textContent = n === 0 ? 'No peers online' : plural(n, 'peer') + ' online';
-    $('peer-pill').className = 'pill ' + (n ? 'pill-on' : 'pill-off');
+    $('peer-count').textContent = isStopped() ? 'Stopped' : n === 0 ? 'No peers online' : plural(n, 'peer') + ' online';
+    $('peer-pill').className = 'pill ' + (n && !isStopped() ? 'pill-on' : 'pill-off');
   }
 
   // ----- peers ----------------------------------------------------------------------------
@@ -297,6 +369,8 @@
       list.appendChild(li);
     });
     $('peers-empty').hidden = state.peers.length > 0;
+    $('peers-empty').textContent = isStopped() ? 'Stopped: not connected to other computers.' :
+      'Looking for other computers running LightningLAN on your network…';
 
     var ignored = $('ignored');
     ignored.textContent = '';
@@ -522,10 +596,12 @@
     if (d.status === 'verifying') return 'Checking SHA-256…';
     parts.push(formatSize(d.received) + ' of ' + formatSize(d.size));
     if (d.status === 'downloading' && d.speed) parts.push(formatSize(d.speed) + '/s');
-    if (d.source) parts.push('from ' + d.source.name);
+    var senders = d.swarm ? d.swarm.peers.filter(function (x) { return x.bytes > 0; }) : [];
+    if (senders.length > 1) parts.push('from ' + senders[0].name + ' and ' + plural(senders.length - 1, 'other peer'));
+    else if (d.source) parts.push('from ' + d.source.name);
     if (d.status === 'paused') parts.push('paused');
     if (d.status === 'canceled') return 'Canceled';
-    if (d.status === 'queued') parts.push('starting…');
+    if (d.status === 'queued') parts.push(d.note ? 'queued' : 'starting…');
     return parts.join(' · ');
   }
 
@@ -537,6 +613,10 @@
       var item = downloadEls[d.id];
       if (!item) {
         var li = el('li', 'dl');
+        var cat = el('button', 'nyan-host');
+        cat.type = 'button';
+        cat.appendChild(nyan());
+        var body = el('div', 'dl-body');
         var top = el('div', 'dl-top');
         var name = el('span', 'dl-name');
         var pct = el('span', 'dl-pct');
@@ -548,11 +628,16 @@
         var note = el('div', 'dl-note');
         var error = el('div', 'dl-error');
         var actions = el('div', 'dl-actions');
-        [top, bar, meta, note, error, actions].forEach(function (c) { li.appendChild(c); });
-        item = downloadEls[d.id] = { li: li, name: name, pct: pct, bar: bar, meta: meta, note: note,
-          error: error, actions: actions, status: null };
+        [top, bar, meta, note, error, actions].forEach(function (c) { body.appendChild(c); });
+        li.appendChild(cat);
+        li.appendChild(body);
+        item = downloadEls[d.id] = { li: li, cat: cat, name: name, pct: pct, bar: bar, meta: meta, note: note,
+          error: error, actions: actions, status: null, d: d };
+        cat.addEventListener('click', catClicked.bind(null, item));
       }
+      item.d = d;
       item.li.className = 'dl ' + d.status;
+      setCat(item.cat, d.status, 'the download of ' + d.name);
       item.name.textContent = d.name;
       item.name.title = d.name;
       var p = percent(d);
@@ -586,6 +671,7 @@
     $('clear-downloads').hidden = !state.downloads.some(function (d) {
       return d.status === 'completed' || d.status === 'canceled';
     });
+    renderNyanAll();
   }
 
   var downloadTimer = null;
@@ -593,7 +679,7 @@
   function scheduleDownloads(delay) {
     clearTimeout(downloadTimer);
     downloadTimer = setTimeout(async function () {
-      if (state.stopped) return;
+      if (state.exited) return;
       try {
         await refreshDownloads();
         connectionOk();
@@ -603,6 +689,129 @@
       var busy = state.downloads.some(function (d) { return ACTIVE[d.status]; });
       scheduleDownloads(busy ? 700 : 3000);
     }, delay);
+  }
+
+  // ----- Nyan Cat download indicators -----------------------------------------------------
+  // A spinning Nyan Cat shows that files are downloading: one on each download, and one in the
+  // top bar for all of them. Pointing at it shows a pause sign; a click pauses, and another
+  // click resumes. It is drawn from the pixel map below, so the page needs no image files.
+
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var NYAN_SPRITE = [
+    '....kkkkkkkkkkkk.......',
+    '...kcccccccccccck......',
+    '...kccpppppppkcck....k.',
+    '...kcppsppppkgkck...kgk',
+    '...kcpppppspkggkkkkkggk',
+    '...kcpppppppkgggggggggk',
+    'kkkkcpspppppkgwkgggwkgk',
+    'kggkcppppsppkgkkgkgkkgk',
+    'kkkkcpppppppkrrgggggrrk',
+    '...kccpppppskggkgkgkggk',
+    '...kccccccccckgggggggk.',
+    '....kkkkkkkkkkkkkkkkk..',
+    '....kgk.kgk..kgk..kgk..',
+    '....kkk.kkk..kkk..kkk..'
+  ];
+  var NYAN_COLORS = { k: '#000000', c: '#ffcc99', p: '#ff99ff', s: '#ff3399', g: '#999999', w: '#ffffff', r: '#ff9999' };
+  var RAINBOW = ['#ff0000', '#ff9900', '#ffff00', '#33ff00', '#0099ff', '#6633ff'];
+  var nyanTemplate = null;
+
+  function svg(tag, attrs) {
+    var e = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs).forEach(function (k) { e.setAttribute(k, String(attrs[k])); });
+    return e;
+  }
+
+  function drawNyan() {
+    var art = svg('svg', { viewBox: '0 0 100 100', 'aria-hidden': 'true', focusable: 'false' });
+    // The rainbow trails the cat around the circle in 15° steps that alternate in and out,
+    // fading towards its far end.
+    for (var step = 0; step < 15; step++) {
+      var trail = svg('g', { opacity: step < 4 ? (step + 1) * 0.2 : 1 });
+      for (var band = 0; band < RAINBOW.length; band++) {
+        var r = 39.5 - band * 3.4 + (step % 2 ? 0.8 : 0);
+        var around = 2 * Math.PI * r;
+        trail.appendChild(svg('circle', {
+          cx: 50, cy: 50, r: r.toFixed(2), fill: 'none', stroke: RAINBOW[band], 'stroke-width': 3.6,
+          'stroke-dasharray': (around * 15.5 / 360).toFixed(2) + ' ' + around.toFixed(2),
+          transform: 'rotate(' + (37 + step * 15) + ' 50 50)'
+        }));
+      }
+      art.appendChild(trail);
+    }
+    // The cat, one path per colour, at the top of the circle facing the way it spins.
+    var cat = svg('g', { transform: 'translate(33.15 7.6) scale(1.9)' });
+    Object.keys(NYAN_COLORS).forEach(function (key) {
+      var d = '';
+      NYAN_SPRITE.forEach(function (row, y) {
+        for (var x = 0; x < row.length; x++) {
+          if (row[x] !== key) continue;
+          var run = 1;
+          while (row[x + run] === key) run++;
+          d += 'M' + x + ' ' + y + 'h' + run + 'v1h-' + run + 'z';
+          x += run - 1;
+        }
+      });
+      if (d) cat.appendChild(svg('path', { d: d, fill: NYAN_COLORS[key] }));
+    });
+    art.appendChild(cat);
+    return art;
+  }
+
+  function overlayIcon(className, path) {
+    var icon = svg('svg', { viewBox: '0 0 24 24', class: className, 'aria-hidden': 'true', focusable: 'false' });
+    icon.appendChild(svg('path', { d: path }));
+    return icon;
+  }
+
+  function nyan() {
+    if (!nyanTemplate) {
+      nyanTemplate = el('span', 'nyan');
+      var orbit = el('span', 'nyan-orbit');
+      orbit.appendChild(drawNyan());
+      var overlay = el('span', 'nyan-overlay');
+      overlay.appendChild(overlayIcon('nyan-pause', 'M7 5h3.5v14H7zM13.5 5H17v14h-3.5z'));
+      overlay.appendChild(overlayIcon('nyan-play', 'M8 5v14l11-7z'));
+      nyanTemplate.appendChild(orbit);
+      nyanTemplate.appendChild(overlay);
+    }
+    return nyanTemplate.cloneNode(true);
+  }
+
+  function setCat(button, status, what) {
+    var paused = status === 'paused';
+    button.hidden = !ACTIVE[status] && !paused;
+    button.classList.toggle('paused', paused);
+    button.classList.toggle('busy', status === 'verifying');
+    var label = status === 'verifying' ? 'Checking SHA-256…' : (paused ? 'Resume ' : 'Pause ') + what;
+    button.title = label;
+    button.setAttribute('aria-label', label);
+  }
+
+  function catClicked(item) {
+    var d = item.d;
+    if (d.status === 'paused') downloadAction(d, 'resume');
+    else if (d.status === 'queued' || d.status === 'downloading') downloadAction(d, 'pause');
+  }
+
+  function renderNyanAll() {
+    var active = state.downloads.filter(function (d) { return ACTIVE[d.status]; }).length;
+    var paused = state.downloads.filter(function (d) { return d.status === 'paused'; }).length;
+    var button = $('nyan-all');
+    setCat(button, active ? 'downloading' : paused ? 'paused' : 'none', 'all downloads');
+    $('nyan-all-label').textContent = active ? plural(active, 'file') + ' downloading' :
+      plural(paused, 'download') + ' paused';
+  }
+
+  async function nyanAllClicked() {
+    var active = state.downloads.some(function (d) { return ACTIVE[d.status]; });
+    try {
+      await api('POST', active ? '/api/downloads/pause-all' : '/api/downloads/resume-all');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    scheduleDownloads(100);
   }
 
   // ----- uploads --------------------------------------------------------------------------
@@ -797,13 +1006,13 @@
 
   function connectionFailed() {
     state.failures++;
-    if (state.failures >= 2 && !state.stopped) $('offline-banner').hidden = false;
+    if (state.failures >= 2 && !state.exited) $('offline-banner').hidden = false;
   }
 
   function every(ms, fn) {
     var running = false;
     async function tick() {
-      if (running || state.stopped) return;
+      if (running || state.exited) return;
       running = true;
       try {
         await fn();
@@ -849,15 +1058,17 @@
         api('POST', '/api/open', { target: b.dataset.open }).catch(function (e) { toast(e.message, 'error'); });
       });
     });
-    $('quit').addEventListener('click', async function () {
-      if (!window.confirm('Stop LightningLAN on this computer? Other peers will no longer see your files.')) return;
-      try { await api('POST', '/api/shutdown'); } catch (e) { /* it may already be gone */ }
-      state.stopped = true;
-      var banner = $('offline-banner');
-      banner.textContent = 'LightningLAN has stopped. You can close this tab.';
-      banner.hidden = false;
+    $('stop-sharing').addEventListener('click', function () { setSharing(false); });
+    $('start-sharing').addEventListener('click', function () { setSharing(true); });
+    $('banner-start').addEventListener('click', function () { setSharing(true); });
+    $('quit').addEventListener('click', quitApp);
+    $('nyan-all').insertBefore(nyan(), $('nyan-all-label'));
+    $('nyan-all').addEventListener('click', nyanAllClicked);
+    window.addEventListener('pageshow', function (e) {
+      if (e.persisted) window.location.reload();  // back from the browser's page cache: start afresh
     });
 
+    holdSession();
     setupDragAndDrop();
     every(5000, refreshStatus);
     every(2000, refreshPeers);

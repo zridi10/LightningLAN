@@ -1,11 +1,12 @@
-"""Serving shared files to other peers: streaming, HTTP Range and optional rate limiting."""
+"""Serving files to other peers: shared files (with HTTP Range), swarm pieces, and the upload limit."""
 
 from __future__ import annotations
 
 import os
 import re
+import threading
 import time
-from typing import BinaryIO, Iterator
+from typing import TYPE_CHECKING, BinaryIO, Callable, Iterator
 from urllib.parse import quote
 
 from fastapi import Request, Response
@@ -14,10 +15,60 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from .indexer import Indexer
 from .pathsafe import UnsafePathError, safe_join
 
+if TYPE_CHECKING:
+    from .transfers import DownloadManager
+
 STREAM_CHUNK = 256 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _RANGE_RE = re.compile(r"^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$", re.IGNORECASE)
 UNSATISFIABLE = "unsatisfiable"
+_BURST = 0.25  # seconds of unused allowance a quiet limiter may save up
+
+
+class UploadsCut(Exception):
+    """Raised inside a transfer to another peer when this peer stops sharing: it ends right there."""
+
+
+class UploadLimiter:
+    """Counts the bytes sent to other peers and, if a limit is set, keeps their total under it.
+
+    It also ends every transfer at once when this peer stops sharing (cut_off).
+    """
+
+    def __init__(self, rate: float | None = None):
+        self.rate = rate  # bytes per second for all transfers together; None = unlimited
+        self.sent = 0
+        self.open = True
+        self.generation = 0  # bumps on every cut_off; transfers started before it end
+        self._clock = time.monotonic()
+        self._lock = threading.Lock()
+
+    def cut_off(self) -> None:
+        """End the transfers in progress (at their next chunk) and refuse new ones until reopen()."""
+        with self._lock:
+            self.open = False
+            self.generation += 1
+
+    def reopen(self) -> None:
+        self.open = True
+
+    def allows(self, generation: int) -> bool:
+        return self.open and self.generation == generation
+
+    def chunk_size(self) -> int:
+        return STREAM_CHUNK if not self.rate else max(16 * 1024, min(STREAM_CHUNK, int(self.rate / 10)))
+
+    def consume(self, n: int) -> None:
+        """Account for n bytes about to be sent, sleeping first if that would exceed the limit."""
+        with self._lock:
+            self.sent += n
+            if not self.rate:
+                return
+            now = time.monotonic()
+            self._clock = max(self._clock, now - _BURST) + n / self.rate
+            delay = self._clock - now - _BURST
+        if delay > 0:
+            time.sleep(delay)
 
 
 def parse_range(header: str, size: int) -> tuple[int, int] | str | None:
@@ -46,33 +97,34 @@ def parse_range(header: str, size: int) -> tuple[int, int] | str | None:
     return start, min(end, size - 1)
 
 
-def _iter_file(f: BinaryIO, start: int, length: int, rate: float | None) -> Iterator[bytes]:
+def _iter_file(f: BinaryIO, start: int, length: int, limiter: UploadLimiter,
+               on_close: Callable[[], None] | None = None) -> Iterator[bytes]:
     """Read [start, start+length) in chunks; never holds more than one chunk in memory."""
     try:
+        generation = limiter.generation
         f.seek(start)
         remaining = length
-        chunk_size = STREAM_CHUNK if not rate else max(16 * 1024, min(STREAM_CHUNK, int(rate / 10)))
-        began, sent = time.monotonic(), 0
+        chunk_size = limiter.chunk_size()
         while remaining > 0:
+            if not limiter.allows(generation):
+                raise UploadsCut()
             data = f.read(min(chunk_size, remaining))
             if not data:
                 return  # file shrank: the client sees a short body and keeps what it got
             remaining -= len(data)
-            sent += len(data)
+            limiter.consume(len(data))
             yield data
-            if rate:
-                ahead = sent / rate - (time.monotonic() - began)
-                if ahead > 0:
-                    time.sleep(ahead)
     finally:
         f.close()
+        if on_close is not None:
+            on_close()
 
 
 def _error(status: int, error: str, detail: str, headers: dict | None = None) -> JSONResponse:
     return JSONResponse({"error": error, "detail": detail}, status_code=status, headers=headers)
 
 
-def serve_download(indexer: Indexer, file_id: str, request: Request, rate: float | None) -> Response:
+def serve_download(indexer: Indexer, file_id: str, request: Request, limiter: UploadLimiter) -> Response:
     if not _SHA256_RE.match(file_id):
         return _error(404, "not_found", "No such file.")
     entry = indexer.lookup(file_id)
@@ -120,8 +172,28 @@ def serve_download(indexer: Indexer, file_id: str, request: Request, rate: float
         f.close()
         return Response(status_code=status, headers=headers, media_type="application/octet-stream")
     return StreamingResponse(
-        _iter_file(f, start, max(0, end - start + 1), rate),
+        _iter_file(f, start, max(0, end - start + 1), limiter),
         status_code=status,
         headers=headers,
+        media_type="application/octet-stream",
+    )
+
+
+def serve_piece(downloads: DownloadManager, file_id: str, index: int, limiter: UploadLimiter) -> Response:
+    """One verified piece of a file this peer is downloading (or downloaded), for the swarm."""
+    if not _SHA256_RE.match(file_id) or index < 0:
+        return _error(404, "not_found", "No such piece.")
+    located = downloads.locate_piece(file_id, index)
+    if located is None:
+        return _error(404, "not_found", "This peer doesn't have that piece.")
+    state, path, start, length = located
+    try:
+        f = open(path, "rb")
+    except OSError:
+        state.release_reader()
+        return _error(404, "not_found", "This peer doesn't have that piece.")
+    return StreamingResponse(
+        _iter_file(f, start, length, limiter, on_close=state.release_reader),
+        headers={"Content-Length": str(length), "Cache-Control": "no-store"},
         media_type="application/octet-stream",
     )

@@ -69,15 +69,24 @@ once.
   Shared folder. Everyone else running LightningLAN on your network sees them within a few
   seconds.
 - **Get files**: click **Download** next to any file. It's saved in your Downloads folder.
+  When several people download the same file at once, LightningLAN passes pieces between
+  them, so it stays fast for everyone. A file you downloaded keeps helping others until you
+  remove it from the Downloads list or stop LightningLAN. While files download, a Nyan Cat
+  spins next to them; point at it and click to pause, click again to resume.
 - **Settings**: click the gear icon at the top right of the page to change your name, your
   folders (use **Browse…** to pick one) or the passphrase. Changes apply immediately.
 - **Passphrase (optional)**: if you set one, only computers using exactly the same passphrase
   see each other. Leave it empty to share with everyone on your network running LightningLAN.
 - **Opening the page again**: open LightningLAN again. If it's already running, it just opens the
   page and doesn't start a second copy. You can also click the tray icon.
-- **Quitting**: on Windows, right-click the tray icon and choose **Quit LightningLAN**. Or click
-  **Stop LightningLAN** on the page. Others stop seeing your files when you quit.
-- **Start LightningLAN when you log in** (optional):
+- **Stopping for a while**: click **Stop LightningLAN** on the page. Others stop seeing your
+  files and your downloads pause. Click **Start LightningLAN** to carry on.
+- **Closing the page** does the same as Stop, a few seconds after you close it. Open the page
+  again (click the tray icon, or open LightningLAN again) and it starts sharing again.
+- **Quitting**: on Windows, right-click the tray icon and choose **Quit LightningLAN**. Or, while
+  LightningLAN is stopped, click **Quit completely** on the page.
+- **Start LightningLAN when you log in** (optional). It opens its page when it starts, and
+  shares while that page is open:
   - **Windows**: press **Windows key + R**, type `shell:startup` and press Enter. A folder
     opens. Drag `LightningLAN.exe` into it while holding the **right** mouse button, let go, and
     choose **Create shortcuts here**.

@@ -106,8 +106,10 @@ class Discovery:
         log.info("advertising %s on %s", self._info.name, ", ".join(self.addresses))
 
     async def stop(self) -> None:
+        """Say goodbye and stop listening. start() may be called again afterwards."""
         if self._watcher is not None:
             self._watcher.cancel()
+            self._watcher = None
         for task in list(self._tasks):
             task.cancel()
         if self._azc is None:
@@ -123,7 +125,7 @@ class Discovery:
             await self._azc.async_unregister_all_services()  # sends goodbye packets
         finally:
             await self._azc.async_close()
-            self._azc = None
+            self._azc = self._browser = self._registration = None
 
     async def update(self, name: str | None = None, auth_enabled: bool | None = None) -> None:
         """Re-announce with a new display name or passphrase flag."""

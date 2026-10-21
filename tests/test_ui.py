@@ -162,7 +162,7 @@ def test_ui_flow_end_to_end_on_two_peers(spawn):
     # A file Bob already has is offered as "in your share", not as a download.
     assert common_files(b)["holiday.jpg"]["local"] is True
 
-    # "Stop LightningLAN" button.
+    # "Quit completely" button (shown while stopped), like the tray's Quit.
     assert a.post("/api/shutdown").json() == {"ok": True}
     a.proc.wait(timeout=15)
     assert a.proc.returncode == 0

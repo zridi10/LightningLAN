@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 from pathlib import Path
 
 from . import __version__
@@ -17,11 +18,16 @@ from .discovery import Discovery
 from .indexer import Indexer
 from .logs import log_dir
 from .peers import PeerTable
-from .transfers import DownloadManager
+from .pieces import PieceInfo
+from .serving import UploadLimiter
+from .transfers import PAUSED, DownloadManager
 
 log = logging.getLogger(__name__)
 
 MAX_PASSPHRASE_LENGTH = 256
+STOPPED, CLOSED = "stopped", "closed"  # why a peer is offline: the Stop button, or the web UI was closed
+UI_CLOSE_GRACE = 10.0  # seconds with no web UI open before it counts as closed (a reload is not a close)
+RESUME_WAIT = 15.0  # after going online, how long paused downloads wait for a peer with the file
 
 
 class SettingsError(Exception):
@@ -39,6 +45,7 @@ class Node:
         )
         self.peers = PeerTable(settings.peer_id, self.auth, settings.refresh_interval)
         self.downloads = DownloadManager(settings.downloads_dir, self.auth, self.peers)
+        self.uploads = UploadLimiter(settings.max_upload_rate)
         self.discovery: Discovery | None = None
         if settings.discovery:
             self.discovery = Discovery(
@@ -50,8 +57,18 @@ class Node:
                 on_lost=self.peers.service_lost,
                 interfaces=settings.interfaces,
             )
-        self._files_cache: tuple[int, bytes, str] | None = None
+        self._files_cache: tuple[tuple[int, int], bytes, str] | None = None
         self._common_cache: tuple[tuple[int, int], bytes, str] | None = None
+        # Online: sharing and downloading. Offline: hidden from peers, transfers stopped.
+        self.online = True
+        self.offline_reason: str | None = None  # STOPPED or CLOSED while offline
+        self.state_version = 0  # bumps on every online/offline change
+        self._switching = asyncio.Lock()
+        self._closing = False
+        self._paused_by_stop: list[str] = []
+        self._ui_sessions = 0
+        self._ui_timer: asyncio.Task | None = None
+        self._tasks: set[asyncio.Task] = set()
 
     @property
     def peer_id(self) -> str:
@@ -68,20 +85,115 @@ class Node:
             await self.discovery.start()
 
     async def stop(self) -> None:
-        if self.discovery is not None:
-            try:
-                await self.discovery.stop()  # say goodbye before anything else goes away
-            except Exception:
-                log.exception("stopping discovery failed")
-        self.downloads.shutdown()
-        await self.peers.stop()
-        self.indexer.stop()
+        self._closing = True
+        for task in list(self._tasks):
+            task.cancel()
+        async with self._switching:  # let a Stop or Start in progress finish first
+            if self.discovery is not None:
+                try:
+                    await self.discovery.stop()  # say goodbye before anything else goes away
+                except Exception:
+                    log.exception("stopping discovery failed")
+            self.downloads.shutdown()
+            await self.peers.stop()
+            self.indexer.stop()
+
+    # ----- going offline and back (the Stop and Start buttons, closing the web UI) ----------
+
+    async def go_offline(self, reason: str) -> None:
+        """Stop sharing: leave the network, refuse other peers, cut off uploads, pause downloads."""
+        async with self._switching:
+            if self._closing:
+                return
+            if not self.online:
+                if reason == STOPPED and self.offline_reason != STOPPED:
+                    self.offline_reason = STOPPED  # now reopening the web UI no longer starts it again
+                    self.state_version += 1
+                return
+            self.online = False
+            self.offline_reason = reason
+            self.state_version += 1
+            self.uploads.cut_off()
+            if self.discovery is not None:
+                try:
+                    await self.discovery.stop()
+                except Exception:
+                    log.exception("stopping discovery failed")
+            self._paused_by_stop = await asyncio.to_thread(self.downloads.pause_all)
+            await self.peers.stop()
+            self.peers.clear()
+            log.info("stopped sharing (%s)", "Stop was pressed" if reason == STOPPED else "the web UI was closed")
+
+    async def go_online(self) -> None:
+        """Share again: rejoin the network and resume the downloads that going offline paused."""
+        async with self._switching:
+            if self.online or self._closing:
+                return
+            self.uploads.reopen()
+            await self.peers.start()
+            if self.discovery is not None:
+                try:
+                    await self.discovery.start()
+                except Exception:
+                    log.exception("could not rejoin the network")
+            self.online = True
+            self.offline_reason = None
+            self.state_version += 1
+            paused, self._paused_by_stop = self._paused_by_stop, []
+            if paused:
+                self._spawn(self._resume_when_found(paused))
+            log.info("sharing again")
+
+    async def _resume_when_found(self, download_ids: list[str]) -> None:
+        # Peers take a moment to reappear: resume each download once a peer has its file again
+        # (or after RESUME_WAIT, so it can say that nobody has it).
+        deadline = time.monotonic() + RESUME_WAIT
+        waiting = list(download_ids)
+        while waiting and self.online:
+            give_up = time.monotonic() >= deadline
+            for download_id in list(waiting):
+                d = self.downloads.find(download_id)
+                if d is None or d.status != PAUSED:
+                    waiting.remove(download_id)  # removed, or resumed by hand
+                elif give_up or self.downloads.sources(d.file_id):
+                    waiting.remove(download_id)
+                    await asyncio.to_thread(self.downloads.resume_all, [download_id])
+            await asyncio.sleep(0.5)
+
+    def ui_opened(self) -> None:
+        """A web UI tab connected. If closing the UI took this peer offline, it comes back."""
+        self._ui_sessions += 1
+        log.debug("web UI session opened (%d open)", self._ui_sessions)
+        if self._ui_timer is not None:
+            self._ui_timer.cancel()
+            self._ui_timer = None
+        if not self.online and self.offline_reason == CLOSED:
+            self._spawn(self.go_online())
+
+    def ui_closed(self) -> None:
+        self._ui_sessions -= 1
+        log.debug("web UI session closed (%d open)", self._ui_sessions)
+        if self._ui_sessions == 0 and self.online and not self._closing:
+            self._ui_timer = self._spawn(self._offline_unless_reopened())
+
+    async def _offline_unless_reopened(self) -> None:
+        await asyncio.sleep(UI_CLOSE_GRACE)
+        self._ui_timer = None  # from here on, reopening the UI brings it back online instead
+        if self._ui_sessions == 0:
+            await self.go_offline(CLOSED)
+
+    def _spawn(self, coro) -> asyncio.Task:
+        task = asyncio.get_running_loop().create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
 
     def files_payload(self) -> tuple[bytes, str]:
-        """The JSON body and ETag for GET /api/files, cached per index version."""
+        """The JSON body and ETag for GET /api/files, cached per index and swarm version."""
         snap = self.indexer.snapshot
+        key = (snap.version, self.downloads.swarm_version)
         cached = self._files_cache
-        if cached is not None and cached[0] == snap.version:
+        if cached is not None and cached[0] == key:
             return cached[1], cached[2]
         body = json.dumps(
             {
@@ -90,12 +202,18 @@ class Node:
                 "version": __version__,
                 "files": [entry.to_dict() for entry in snap.entries],
                 "indexing": {"pending": snap.pending},
+                # Its presence says we serve piece lists; the ids are files we can pass pieces of.
+                "swarm": self.downloads.swarm_files(),
             },
             separators=(",", ":"),
         ).encode("utf-8")
         etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
-        self._files_cache = (snap.version, body, etag)
+        self._files_cache = (key, body, etag)
         return body, etag
+
+    def piece_info(self, file_id: str) -> PieceInfo | None:
+        """Piece hashes for a file we share, or one we downloaded whole and still list."""
+        return self.indexer.pieces_info(file_id) or self.downloads.piece_info_for(file_id)
 
     def common_payload(self) -> tuple[bytes, str]:
         """The merged Common Space as JSON plus an ETag, recomputed only when something changed."""
@@ -132,6 +250,9 @@ class Node:
             "shared_files": len(snap.entries),
             "indexing_pending": snap.pending,
             "peers_online": len(self.peers.online()),
+            "uploaded_bytes": self.uploads.sent,
+            "online": self.online,
+            "offline_reason": self.offline_reason,
             "first_run": self.settings.first_run,
         }
 

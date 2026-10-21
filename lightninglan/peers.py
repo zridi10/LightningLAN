@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 MAX_FAILURES = 3
 MAX_INDEX_BYTES = 64 * 1024 * 1024
 MAX_FILES_PER_PEER = 200_000
+MAX_SWARM_FILES = 10_000
 OFFLINE_RETRY_INTERVAL = 10.0
 IGNORED_RETRY_INTERVAL = 30.0
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -60,6 +61,8 @@ class Peer:
     indexing: int = 0
     etag: str | None = None
     next_poll: float = 0.0
+    swarm: bool = False  # serves piece lists and swarm pieces (LightningLAN 1.1+)
+    swarm_files: frozenset[str] = frozenset()  # files it can pass pieces of (downloading or downloaded)
 
     @property
     def online(self) -> bool:
@@ -86,6 +89,14 @@ class Peer:
             "last_error": self.last_error,
             "reason": self.ignore_reason,
         }
+
+
+def parse_swarm(payload: dict) -> tuple[bool, frozenset[str]]:
+    """Whether a peer's index says it takes part in swarms, and the files it has pieces of."""
+    raw = payload.get("swarm")
+    if not isinstance(raw, list):
+        return False, frozenset()
+    return True, frozenset(x for x in raw[:MAX_SWARM_FILES] if isinstance(x, str) and _SHA256_RE.match(x))
 
 
 def parse_index(payload: object, expected_peer_id: str) -> tuple[str, tuple[RemoteFile, ...], int]:
@@ -141,14 +152,21 @@ class PeerTable:
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
+        task, self._task = self._task, None
+        if task is not None:
+            task.cancel()
             try:
-                await self._task
+                await task
             except asyncio.CancelledError:
                 pass
-        if self._client is not None:
-            await self._client.aclose()
+        client, self._client = self._client, None
+        if client is not None:
+            await client.aclose()
+
+    def clear(self) -> None:
+        """Forget every peer (this peer left the network; discovery finds them again on return)."""
+        self._peers.clear()
+        self.version += 1
 
     # ----- queries ----------------------------------------------------------------------
 
@@ -259,7 +277,9 @@ class PeerTable:
                 raise PollError(f"HTTP {resp.status_code}")
             body = await _read_limited(resp, MAX_INDEX_BYTES)
             etag = resp.headers.get("etag")
-        name, files, pending = parse_index(json.loads(body), peer.peer_id)
+        payload = json.loads(body)
+        name, files, pending = parse_index(payload, peer.peer_id)
+        peer.swarm, peer.swarm_files = parse_swarm(payload)
         if name and name != peer.name:
             peer.name = name
         if files != peer.files or not peer.online:

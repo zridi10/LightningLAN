@@ -117,6 +117,9 @@ button { font: inherit; color: inherit; }
 
 .banner { background: var(--danger-soft); color: var(--danger); padding: 10px 24px; font-weight: 550;
           border-bottom: 1px solid var(--border); }
+.stopped-banner { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; background: var(--surface-2);
+                  color: var(--text); }
+.banner-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
 /* ----- layout -------------------------------------------------------------------------------- */
 
@@ -211,11 +214,14 @@ button { font: inherit; color: inherit; }
             font-weight: 550; }
 .text-btn:hover { text-decoration: underline; }
 .text-btn.danger { color: var(--danger); margin-top: 6px; padding-left: 0; }
+.start-btn { margin-top: 6px; }
 
 /* ----- downloads -------------------------------------------------------------------------- */
 
 .downloads { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.dl { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--surface); }
+.dl { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--surface);
+      display: flex; gap: 10px; align-items: flex-start; }
+.dl-body { flex: 1; min-width: 0; }
 .dl-top { display: flex; gap: 8px; align-items: baseline; }
 .dl-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .dl-pct { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -240,6 +246,31 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .folder-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-width: 0; }
 .folder-line .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
                      flex: 1; min-width: 0; color: var(--muted); }
+
+/* ----- Nyan Cat download indicator ------------------------------------------------------- */
+
+.nyan-host { position: relative; flex: none; padding: 0; border: none; background: none; cursor: pointer;
+             border-radius: 50%; }
+.nyan-host:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nyan { position: relative; display: block; width: 46px; height: 46px; }
+.nyan-orbit { display: block; width: 100%; height: 100%; animation: nyan-spin 1.2s linear infinite; }
+.nyan-orbit svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.nyan-overlay { position: absolute; inset: 18%; border-radius: 50%; display: grid; place-items: center;
+                background: rgba(10, 12, 20, 0.62); opacity: 0; transition: opacity 0.12s; pointer-events: none; }
+.nyan-overlay svg { width: 56%; height: 56%; fill: #fff; }
+.nyan-play { display: none; }
+.nyan-host:hover .nyan-overlay, .nyan-host:focus-visible .nyan-overlay, .nyan-host.paused .nyan-overlay { opacity: 1; }
+.nyan-host.paused .nyan-orbit { animation-play-state: paused; opacity: 0.6; }
+.nyan-host.paused .nyan-pause { display: none; }
+.nyan-host.paused .nyan-play { display: block; }
+.nyan-host.busy { cursor: default; }
+.nyan-host.busy .nyan-overlay { display: none; }
+@keyframes nyan-spin { to { transform: rotate(360deg); } }
+
+.nyan-all { display: inline-flex; align-items: center; gap: 6px; padding: 1px 12px 1px 2px; border-radius: 999px;
+            border: 1px solid var(--border); background: var(--surface-2); font-size: 13px; font-weight: 550; }
+.nyan-all:focus-visible { outline-offset: 1px; }
+.nyan-all .nyan { width: 34px; height: 34px; }
 
 /* ----- peers ------------------------------------------------------------------------------ */
 
@@ -288,4 +319,7 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .toast.error { border-left-color: var(--danger); }
 .toast.ok { border-left-color: var(--ok); }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .toast { animation: none; } * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .toast, .nyan-orbit { animation: none; }
+  * { transition: none !important; }
+}

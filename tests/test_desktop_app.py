@@ -55,7 +55,7 @@ def tray(tmp_path, monkeypatch):
     monkeypatch.setattr(tray_module, "open_in_file_manager", lambda path, reveal=False: opened.append(path))
     monkeypatch.setattr(tray_module, "open_url", lambda url: urls.append(url) or True)
     settings = SimpleNamespace(name="Den PC", share_dir=tmp_path / "share", downloads_dir=tmp_path / "dl")
-    node = SimpleNamespace(settings=settings, peers=SimpleNamespace(online=lambda: ["peer"] * 2))
+    node = SimpleNamespace(settings=settings, peers=SimpleNamespace(online=lambda: ["peer"] * 2), online=True)
     try:
         t = tray_module.Tray(node, "http://localhost:8765", tmp_path / "logs", lambda: quits.append(True))
     except Exception as exc:  # e.g. a Linux CI runner with no X display
@@ -106,3 +106,5 @@ def test_tray_action_errors_are_contained(tray, monkeypatch):
 @needs_tray
 def test_tray_tooltip(tray):
     assert tray.title() == "LightningLAN: Den PC (2 peers online)"
+    tray.node.online = False  # Stop pressed, or the web UI was closed
+    assert tray.title() == "LightningLAN: Den PC (stopped)"

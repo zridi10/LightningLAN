@@ -10,9 +10,12 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
 
 - Automatic discovery on the LAN (`_lightninglan._tcp.local.`), with no IP addresses to type.
 - Identical files on several peers (same SHA-256) are shown once, with every owner listed.
-- Downloads stream to disk, resume after an interruption (HTTP Range) and are verified with
-  SHA-256 before they are saved. If the sending peer disappears, another peer with the same
-  file takes over.
+- Swarm downloads: when several people download the same file, they pass pieces to each other
+  instead of all queuing at the person sharing it, so it stays fast for everyone (see
+  [Swarm downloads](#swarm-downloads)).
+- Downloads stream to disk, resume after an interruption and are verified piece by piece and
+  then as a whole (SHA-256) before they are saved. If a sending peer disappears, the others
+  carry on.
 - Optional shared passphrase: peers without it can't see or download anything.
 - Light and dark mode, sortable and filterable file list, progress bars and clear errors.
 - Zero setup: default folders and name, a free port, a tray / menu bar icon, and a Settings
@@ -84,7 +87,7 @@ and downloads folders, then opens the UI in your default browser.
 | `--config FILE` | Use a different config file (for example, to run two peers on one computer). |
 | `--interface IP` | Advertise only on this local IPv4 address (repeatable). By default the LAN interfaces are detected automatically. |
 | `--refresh-interval SECONDS` | How often peers are polled for changes. Default `3`. |
-| `--max-upload-rate MB_PER_S` | Limit how fast each peer can download from you. Default: unlimited. |
+| `--max-upload-rate MB_PER_S` | Limit your total upload to other peers (all transfers together). Default: unlimited. |
 | `--no-browser` | Don't open the browser on start. |
 | `--no-tray` | No tray icon and no pop-up error messages, for servers and scripts. The tray is also skipped automatically when there is no desktop session. |
 | `-v`, `--verbose` | Log every request and debug messages. |
@@ -125,11 +128,14 @@ locations too.
   yourself; LightningLAN rescans it every few seconds.
 - **Common Space**: click a column heading to sort, or type in the filter box. Files you
   already have say "In your share".
-- **Downloads**: progress, speed and source, with Pause, Resume and Cancel. While a download
-  runs, the data goes to `<downloads>/.lightninglan-partial/<sha256>.part`. The file is renamed into
-  place only after its SHA-256 matches, and a corrupted transfer is discarded. If the peer goes
-  offline mid-transfer, the error says so, the partial file is kept, and **Resume** continues
-  from where it stopped once the peer (or another peer with the same file) is back.
+- **Downloads**: progress, speed and sources, with Pause, Resume and Cancel. Each active
+  download shows a spinning Nyan Cat, and so does the top bar while anything downloads. Point
+  at the cat for a pause sign: a click pauses, another click resumes (the top-bar cat pauses or
+  resumes all downloads). Up to three downloads run at once; more wait as *queued*. While a download runs, the data goes to
+  `<downloads>/.lightninglan-partial/<sha256>.part`. The file is renamed into place only after
+  its SHA-256 matches, and a corrupted transfer is discarded. If every peer with the file goes
+  offline mid-transfer, the error says so, the verified pieces are kept, and **Resume**
+  continues once a peer with the file is back.
 - **Peers**: everyone online with their file counts. Peers that were found but rejected (for
   example, a different passphrase) are listed separately with the reason.
 - **Settings** (the gear icon): your name, the shared and downloads folders (with a
@@ -139,11 +145,47 @@ locations too.
   passphrase change, every peer is checked again.
 - **Tray / menu bar icon**: Open LightningLAN (also what clicking the icon does on Windows),
   Open Shared Folder, Open Downloads Folder, Open Log Folder, Quit LightningLAN.
-- **Stop LightningLAN** (in the *Your shared folder* card) shuts this peer down. Ctrl+C in the
-  terminal does the same.
+- **Stop LightningLAN** (in the *Your shared folder* card) takes this computer off the network
+  without quitting. Other peers stop seeing it, transfers to them are cut off, and your
+  downloads pause. **Start LightningLAN** brings it back and resumes those downloads once a
+  peer with the file is found again. To quit, use **Quit completely** on the banner shown
+  while stopped, the tray icon's **Quit LightningLAN**, or Ctrl+C in the terminal.
+- **Closing the page** works like Stop: about 10 seconds after the last LightningLAN tab
+  closes, this computer goes offline. A reload doesn't count. Opening the page again, from the
+  tray icon or by starting LightningLAN again, brings it back online. If you pressed Stop
+  yourself, it stays stopped until you press Start. Browsers may put a long-unused background
+  tab to sleep, which counts as closing it. Started with `--no-browser` and never opened, it
+  stays online.
 
 Files only appear in the Common Space after they have been hashed. A very large shared folder
 takes a while the first time; after that the hash cache makes restarts quick.
+
+## Swarm downloads
+
+Files larger than 1 MB are split into pieces of 1–16 MB (at most about 2,000 pieces per file),
+and the sharer's index holds a SHA-256 for every piece as well as for the whole file. A download
+fetches up to 8 pieces at a time from every peer that has them:
+
+- **Sharers** (peers with the file in their shared folder) send byte ranges of it.
+- **Fellow downloaders** pass on the pieces they have already verified, while they are still
+  downloading. Each one publishes which pieces it has and which it is fetching.
+- **Finished downloads** keep passing pieces on while LightningLAN runs (and isn't stopped) and
+  the download is still in the Downloads list. Removing it from the list, clearing finished downloads, or
+  changing the saved file stops that.
+
+Usually the sharer's upload is the bottleneck. So while some pieces exist only at the sharer, a
+downloader asks it only for those, and gets everything else from the fellow downloaders. On
+this PC, 10 downloaders starting a 100 MB file at once from a sharer capped at 10 MB/s all
+finished in 14–18 seconds. Without swarming each would take at least 100 seconds, and a single
+download alone takes 10. Those peers all ran on one computer, so their uploads to each other
+weren't limited; on a real network, each downloader's own upload speed matters too. On one
+shared Wi-Fi network the gain is smaller, because every transfer uses the same radio channel.
+
+Every piece is checked against its hash before it is kept or passed on. A peer that sends two
+bad pieces is dropped for the rest of the download. If pieces keep failing against the piece
+list itself, the download falls back to fetching the file whole from one sharer. Peers running
+LightningLAN 1.0 still work: they download whole files from 1.1 peers, and serve whole files to
+them.
 
 ## Firewall notes
 
@@ -202,9 +244,17 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
 
 ## Security
 
-- **What the LAN can reach.** Only two read-only endpoints: the file list (`GET /api/files`)
-  and downloads of files inside your shared folder (`GET /api/download/<sha256>`). A download is
-  looked up by hash in your own index, never by a path from the network. Everything else (the
+- **What the LAN can reach.** Only read-only endpoints: the file list (`GET /api/files`),
+  downloads of files inside your shared folder (`GET /api/download/<sha256>`), and the swarm
+  endpoints: a shared file's piece hashes (`/api/pieces/<sha256>`), which pieces you hold of a
+  file you are downloading (`/api/swarm/<sha256>`), and those pieces themselves
+  (`/api/piece/<sha256>/<n>`). Files are always looked up by hash in your own index or download
+  list, never by a path from the network. While LightningLAN is stopped (or its page is
+  closed), all of these answer "503 offline", and transfers in progress are cut off.
+- **What swarming reveals.** Your file list includes the hashes of files you are downloading or
+  have downloaded (while they are in the Downloads list), so other peers can tell which shared
+  files you fetched. Pieces of those files are served only to peers asking for them by hash,
+  that is, peers who can already see the file in someone's share. Everything else (the
   web UI, uploads, starting downloads, shutdown) only answers requests from this computer. It
   checks the client address is loopback and the `Host` header is `localhost`, which defeats DNS
   rebinding. State-changing requests also need a custom header and a same-origin `Origin`, so
@@ -239,8 +289,8 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
   by itself.
 - **Something else went wrong**: check `logs/lightninglan.log` in the config folder (tray menu →
   **Open Log Folder**).
-- **A peer stays listed briefly after its computer disappears.** Peers that quit normally
-  vanish immediately. A computer that drops off the network is removed after 3 failed checks,
+- **A peer stays listed briefly after its computer disappears.** Peers that quit or stop
+  normally vanish immediately. A computer that drops off the network is removed after 3 failed checks,
   typically 10–20 seconds.
 - **A download stopped with "went offline during the transfer".** Press **Resume** once the
   peer is back. The partial file is kept, and only the rest is transferred.
@@ -323,8 +373,10 @@ lightninglan/
   peers.py       peer table, polling and health checks
   indexer.py     scanning the shared folder, SHA-256 hash cache
   common.py      merging indexes into the Common Space
-  serving.py     streaming files to peers, Range requests
-  transfers.py   download manager: resume, verification, fail-over
+  serving.py     streaming files and pieces to peers, Range requests, the upload limit
+  transfers.py   download manager: queue, resume, verification, fall-back to whole files
+  swarm.py       swarm downloads: choosing pieces and peers, passing pieces on
+  pieces.py      piece sizes, piece hashes, have-maps
   uploads.py     receiving files from the UI
   pathsafe.py    path traversal protection and file-name sanitising
   static/        the web UI (index.html, app.js, style.css)
@@ -342,7 +394,11 @@ tests/           unit tests and a multi-process integration harness
   file can only be downloaded once it has been hashed.
 - Symlinked files are shared only if they point inside the shared folder. Symlinked folders and
   junctions are never followed.
-- `--max-upload-rate` applies to each transfer separately, not to the total.
+- Swarming helps only peers downloading the same file around the same time, or downloading it
+  after someone finished and still lists it. A new download can't start from fellow downloaders
+  alone: at least one peer must still share the whole file.
+- Downloaded files keep their name but not their folder: everything lands directly in the
+  downloads folder.
 - Files with the same name but different content show up as separate rows.
 - The packaged apps are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn on
   first launch (see [INSTALL.md](INSTALL.md)). Antivirus programs sometimes flag one-file

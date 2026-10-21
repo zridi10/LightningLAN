@@ -68,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-upload-rate",
         type=float,
         metavar="MB_PER_S",
-        help="limit how fast each peer can download from you, in megabytes per second",
+        help="limit your total upload to other peers, in megabytes per second",
     )
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
     p.add_argument("--no-tray", action="store_true", help="no tray icon and no pop-up messages (servers, scripts)")
@@ -271,6 +271,7 @@ def _serve(settings: Settings, sock: socket.socket, args: argparse.Namespace) ->
         server.should_exit = True
 
     app.state.request_shutdown = request_shutdown
+    app.state.exiting = lambda: server.should_exit  # lets the web UI's open session end promptly
     url = f"http://localhost:{settings.port}"
     tray = None if args.no_tray else _make_tray(node, url, request_shutdown)
     threading.Thread(target=_after_start, args=(server, node, url), daemon=True).start()

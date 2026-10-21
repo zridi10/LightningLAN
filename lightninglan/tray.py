@@ -74,6 +74,8 @@ class Tray:
         self.stop()
 
     def title(self) -> str:
+        if not self.node.online:
+            return f"LightningLAN: {self.node.settings.name[:60]} (stopped)"
         n = len(self.node.peers.online())
         peers = "no peers online" if n == 0 else f"{n} peer{'s' if n != 1 else ''} online"
         return f"LightningLAN: {self.node.settings.name[:60]} ({peers})"

@@ -23,6 +23,9 @@
       </span>
     </div>
     <div class="top-right">
+      <button id="nyan-all" class="nyan-host nyan-all" type="button" hidden>
+        <span id="nyan-all-label"></span>
+      </button>
       <span id="peer-pill" class="pill pill-off" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="peer-count">0 peers online</span>
       </span>
@@ -37,6 +40,14 @@
 
   <div id="offline-banner" class="banner" hidden role="alert">
     Lost contact with LightningLAN on this computer. Is it still running?
+  </div>
+
+  <div id="stopped-banner" class="banner stopped-banner" hidden role="status">
+    <span>LightningLAN is stopped: other computers can't see your files, and your downloads are paused.</span>
+    <span class="banner-actions">
+      <button id="banner-start" class="btn" type="button">Start LightningLAN</button>
+      <button id="quit" class="text-btn" type="button">Quit completely</button>
+    </span>
   </div>
 
   <main class="layout">
@@ -114,7 +125,8 @@
           <button class="text-btn" type="button" data-open="share">Open</button>
         </div>
         <p class="muted small" id="share-summary"></p>
-        <button id="quit" class="text-btn danger" type="button">Stop LightningLAN</button>
+        <button id="stop-sharing" class="text-btn danger" type="button">Stop LightningLAN</button>
+        <button id="start-sharing" class="btn start-btn" type="button" hidden>Start LightningLAN</button>
       </section>
     </aside>
   </main>

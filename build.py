@@ -160,6 +160,7 @@ def smoke_test(command: list[str]) -> None:
         base = f"http://127.0.0.1:{port}"
         (tmp_path / "share").mkdir()
         (tmp_path / "share" / "hello.txt").write_text("hello from the smoke test\n")
+        (tmp_path / "share" / "pieces.bin").write_bytes(bytes(range(256)) * (3 * 4096 + 1))  # 3 MB + 256 B
         cmd = command + [
             "--config", str(tmp_path / "config.json"), "--share", str(tmp_path / "share"),
             "--downloads", str(tmp_path / "downloads"), "--port", str(port), "--name", "Smoke Test",
@@ -191,12 +192,15 @@ def smoke_test(command: list[str]) -> None:
             deadline = time.monotonic() + 30
             while True:
                 files = json.loads(http("GET", f"{base}/api/files")[1])["files"]
-                if [f["name"] for f in files] == ["hello.txt"]:
+                if sorted(f["name"] for f in files) == ["hello.txt", "pieces.bin"]:
                     break
                 if time.monotonic() > deadline:
                     raise RuntimeError(f"the shared file was not indexed: {files}")
                 time.sleep(0.5)
-            print("  web UI, static files and indexing work", flush=True)
+            big = next(f for f in files if f["name"] == "pieces.bin")
+            pieces = json.loads(http("GET", f"{base}/api/pieces/{big['id']}")[1])
+            assert pieces["size"] == big["size"] and pieces["hashes"], "no piece list"
+            print("  web UI, static files, indexing and swarm piece lists work", flush=True)
             http("POST", f"{base}/api/shutdown")
             code = proc.wait(timeout=30)
             if code != 0:

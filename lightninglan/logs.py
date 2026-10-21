@@ -27,7 +27,16 @@ class _NotFileOnly(logging.Filter):
         return not getattr(record, "file_only", False)
 
 
+class _HideCutTransfers(logging.Filter):
+    """uvicorn calls a response that ends early an error. Ours only do that on purpose: stopping
+    LightningLAN cuts off transfers to other peers (see serving.UploadsCut)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage() != "ASGI callable returned without completing response."
+
+
 def setup_console_logging(verbose: bool) -> None:
+    logging.getLogger("uvicorn.error").addFilter(_HideCutTransfers())
     root = logging.getLogger()
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     if sys.stderr is not None:

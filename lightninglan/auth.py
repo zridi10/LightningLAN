@@ -19,6 +19,7 @@ from typing import Mapping
 TOKEN_HEADER = "X-LightningLAN-Auth"
 PROOF_HEADER = "X-LightningLAN-Proof"
 MAX_CLOCK_SKEW = 300  # seconds
+PRUNE_INTERVAL = 30.0  # how often expired nonces are dropped from the replay cache
 _KDF_SALT = b"lightninglan/v1/peer-auth"
 _KDF_ITERATIONS = 200_000
 _TOKEN_RE = re.compile(r"^v1\.([0-9a-f]{32})\.(\d{1,12})\.([0-9a-f]{24})\.([0-9a-f]{64})$")
@@ -50,6 +51,7 @@ class Authenticator:
         self.enabled = bool(passphrase)
         self._key = derive_key(passphrase) if passphrase else b""
         self._seen: dict[str, float] = {}
+        self._next_prune = 0.0
         self._lock = threading.Lock()
 
     def set_key(self, key: bytes | None) -> None:
@@ -104,8 +106,9 @@ class Authenticator:
         with self._lock:
             if nonce in self._seen:
                 raise AuthError("replay")
-            if len(self._seen) > 10_000:
+            if now >= self._next_prune:  # swarms send many requests: prune by time, not on every call
                 self._seen = {n: exp for n, exp in self._seen.items() if exp > now}
+                self._next_prune = now + PRUNE_INTERVAL
             self._seen[nonce] = now + 2 * MAX_CLOCK_SKEW
         return peer_id
 

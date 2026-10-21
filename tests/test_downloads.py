@@ -67,12 +67,16 @@ def test_interrupted_download_resumes_where_it_stopped(spawn):
     paused = b.post(f"/api/downloads/{download_id}/pause").json()
     assert paused["status"] == "paused", paused
 
-    part = partial_path(b, file_id)
-    kept = part.stat().st_size
+    # Pieces arrive out of order; "received" counts the verified ones, which are kept on disk.
+    kept = paused["received"]
     assert 6 * MB <= kept < size
-    assert paused["received"] == kept
-    with open(a.share / "video.mp4", "rb") as original:
-        assert part.read_bytes() == original.read(kept), "partial file must be an exact prefix"
+    assert paused["swarm"]["have"] * MB == kept  # 1 MiB pieces for a 32 MB file
+    part = partial_path(b, file_id)
+    with open(a.share / "video.mp4", "rb") as original, open(part, "rb") as partial:
+        matching = 0
+        for _ in range(size // MB):
+            matching += original.read(MB) == partial.read(MB)
+    assert matching * MB == kept, "every piece counted as received is on disk and correct"
     assert not (b.downloads / "video.mp4").exists()
 
     resumed = b.post(f"/api/downloads/{download_id}/resume").json()

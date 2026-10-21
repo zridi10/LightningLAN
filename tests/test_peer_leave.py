@@ -79,8 +79,9 @@ def test_peer_killed_mid_transfer_shows_error_and_resumes_after_restart(spawn):
     assert "A went offline during the transfer" in d["error"], d["error"]
     assert "press Resume" in d["error"]
     part = b.downloads / ".lightninglan-partial" / f"{file_id}.part"
-    kept = part.stat().st_size
+    kept = d["received"]  # verified pieces, kept on disk
     assert 5 * MB <= kept < size
+    assert part.exists()
     assert not (b.downloads / "movie.mkv").exists()
     wait_for(lambda: a.peer_id not in b.online_peer_ids(), timeout=20, message="B to notice A is gone")
 
@@ -88,7 +89,7 @@ def test_peer_killed_mid_transfer_shows_error_and_resumes_after_restart(spawn):
     b.post(f"/api/downloads/{download_id}/resume")
     d = wait_download(b, download_id, timeout=30)
     assert d["status"] == "failed" and "No online peer" in d["error"]
-    assert part.stat().st_size == kept
+    assert d["received"] == kept and part.exists()
 
     # A comes back (same config, same peer ID): resume continues from the kept bytes.
     a.extra_args = ()
@@ -101,25 +102,32 @@ def test_peer_killed_mid_transfer_shows_error_and_resumes_after_restart(spawn):
     assert sha256_of(b.downloads / "movie.mkv") == file_id
 
 
-def test_download_fails_over_to_another_source(spawn):
+def test_download_carries_on_from_another_source(spawn):
+    # Both A and C share the file; the download takes pieces from both at once.
     a = spawn("A", start=False, extra_args=("--max-upload-rate", "8"))
-    c = spawn("C", start=False)
+    c = spawn("C", start=False, extra_args=("--max-upload-rate", "8"))
     b = spawn("B", start=False)
-    size = 24 * MB
+    size = 48 * MB
     file_id = make_random_file(a.share / "dataset.bin", size)
     (c.share / "dataset-copy.bin").write_bytes((a.share / "dataset.bin").read_bytes())
     start_together(a, b, c)
     wait_until_listed(b, file_id, a)
     wait_until_listed(b, file_id, c)
 
-    download_id = b.post("/api/downloads", json={"file_id": file_id, "peer_id": a.peer_id}).json()["id"]
-    wait_for(lambda: get_download(b, download_id)["received"] >= 4 * MB, timeout=30, interval=0.05,
-             message="4 MB to arrive from A")
-    assert get_download(b, download_id)["source"]["peer_id"] == a.peer_id
+    download_id = b.post("/api/downloads", json={"file_id": file_id}).json()["id"]
+
+    def senders():
+        swarm = get_download(b, download_id)["swarm"] or {"peers": []}  # None until the piece list is in
+        return {p["peer_id"] for p in swarm["peers"] if p["bytes"]}
+
+    wait_for(lambda: senders() == {a.peer_id, c.peer_id}, timeout=30, interval=0.05,
+             message="pieces from both A and C")
     a.kill()
 
     d = wait_download(b, download_id, timeout=60)
     assert d["status"] == "completed", d
-    assert d["source"]["peer_id"] == c.peer_id
-    assert d["resumed_from"] >= 4 * MB, "C should continue where A stopped, not start over"
+    assert d["resumed_from"] == 0, "the download never stopped: C carried on alone"
+    by_peer = {p["peer_id"]: p["bytes"] for p in d["swarm"]["peers"]}
+    assert by_peer[a.peer_id] + by_peer[c.peer_id] == size
+    assert by_peer[c.peer_id] > by_peer[a.peer_id]
     assert sha256_of(b.downloads / "dataset.bin") == file_id

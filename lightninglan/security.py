@@ -1,7 +1,9 @@
 """Access control for the HTTP server, as plain ASGI middleware (it must not buffer streams).
 
-* Only GET/HEAD /api/files and /api/download/{id} are reachable from the LAN. When a
+* Only GET/HEAD /api/files, /api/download/{id} and the swarm routes (/api/pieces/{id},
+  /api/swarm/{id}, /api/piece/{id}/{n}) are reachable from the LAN. When a
   passphrase is set they require a valid peer token, and responses carry a proof header.
+  While this peer is stopped (offline) they answer 503, and transfers in progress are cut off.
 * Everything else (the web UI, uploads, starting downloads) is for the local user only. It
   requires a loopback client address and a localhost Host header (blocking DNS rebinding).
   State-changing requests must also carry X-LightningLAN-Client and, if the browser sent an
@@ -12,17 +14,22 @@ from __future__ import annotations
 
 import ipaddress
 import json
+from typing import Callable
 from urllib.parse import urlsplit
 
 from .auth import PROOF_HEADER, TOKEN_HEADER, AuthError, Authenticator
+from .serving import UploadsCut
 
 CLIENT_HEADER = "x-lightninglan-client"
 _LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
+_LAN_PREFIXES = ("/api/download/", "/api/pieces/", "/api/swarm/", "/api/piece/")
+
+
 def is_lan_route(path: str) -> bool:
-    return path == "/api/files" or path.startswith("/api/download/")
+    return path == "/api/files" or path.startswith(_LAN_PREFIXES)
 
 
 def is_loopback(host: str | None) -> bool:
@@ -63,9 +70,10 @@ def is_local_origin(origin: str) -> bool:
 
 
 class AccessControlMiddleware:
-    def __init__(self, app, auth: Authenticator):
+    def __init__(self, app, auth: Authenticator, online: Callable[[], bool] = lambda: True):
         self.app = app
         self.auth = auth
+        self.online = online
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -79,6 +87,9 @@ class AccessControlMiddleware:
             if method not in ("GET", "HEAD"):
                 await _reject(send, 405, "method_not_allowed", "Only GET and HEAD are allowed here.")
                 return
+            if not self.online():
+                await _reject(send, 503, "offline", "This peer has stopped sharing.")
+                return
             if self.auth.enabled:
                 token = headers.get(TOKEN_HEADER.lower())
                 try:
@@ -87,7 +98,10 @@ class AccessControlMiddleware:
                     await _reject(send, 401, "auth_failed", str(exc), reason=exc.reason)
                     return
                 send = _with_proof(send, self.auth.proof_for(token or ""))
-            await self.app(scope, receive, send)
+            try:
+                await self.app(scope, receive, send)
+            except UploadsCut:
+                pass  # this peer went offline mid-transfer; ending early makes the server drop the connection
             return
 
         client = scope.get("client")
