@@ -136,3 +136,41 @@ async def _reject(send, status: int, error: str, detail: str, reason: str | None
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+)
+_SECURITY_HEADERS = [
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"x-frame-options", b"DENY"),
+    (b"cross-origin-resource-policy", b"same-origin"),
+    (b"content-security-policy", CONTENT_SECURITY_POLICY.encode("latin-1")),
+]
+
+
+class SecurityHeadersMiddleware:
+    """Hardening headers on every response; the UI's own files are never cached stale."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        no_cache = path == "/" or path.startswith("/static/")
+
+        async def wrapped(message):
+            if message["type"] == "http.response.start":
+                headers = [h for h in message.get("headers", []) if not (no_cache and h[0].lower() == b"cache-control")]
+                headers += _SECURITY_HEADERS
+                if no_cache:
+                    headers.append((b"cache-control", b"no-cache"))
+                message = dict(message, headers=headers)
+            await send(message)
+
+        await self.app(scope, receive, wrapped)

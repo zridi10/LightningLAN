@@ -4,21 +4,34 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.requests import ClientDisconnect
 
+from .desktop import open_in_file_manager
 from .node import Node
-from .security import AccessControlMiddleware
+from .security import AccessControlMiddleware, SecurityHeadersMiddleware
 from .serving import serve_download
 from .transfers import DownloadError
 from .uploads import receive_upload
 
 
+STATIC_DIR = Path(__file__).parent / "static"
+
+
 class StartDownload(BaseModel):
     file_id: str
     peer_id: str | None = None
+
+
+class OpenTarget(BaseModel):
+    target: Literal["share", "downloads", "download"]
+    download_id: str | None = None
 
 
 def etag_matches(if_none_match: str | None, etag: str) -> bool:
@@ -41,6 +54,7 @@ def create_app(node: Node) -> FastAPI:
     app.state.node = node
     app.state.request_shutdown = None
     app.add_middleware(AccessControlMiddleware, auth=node.auth)
+    app.add_middleware(SecurityHeadersMiddleware)  # outermost: applies to rejections too
 
     # ----- LAN-facing, read-only --------------------------------------------------------
 
@@ -55,6 +69,14 @@ def create_app(node: Node) -> FastAPI:
     @app.api_route("/api/download/{file_id}", methods=["GET", "HEAD"])
     def download_file(file_id: str, request: Request) -> Response:
         return serve_download(node.indexer, file_id, request, node.settings.max_upload_rate)
+
+    # ----- local web UI -----------------------------------------------------------------
+
+    @app.get("/", include_in_schema=False)
+    def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     # ----- local UI API -----------------------------------------------------------------
 
@@ -115,6 +137,26 @@ def create_app(node: Node) -> FastAPI:
             node.downloads.remove(download_id)
         except DownloadError as exc:
             raise HTTPException(409, str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/api/open")
+    def open_folder(body: OpenTarget) -> dict:
+        if body.target == "share":
+            path, reveal = node.settings.share_dir, False
+        elif body.target == "downloads":
+            path, reveal = node.settings.downloads_dir, False
+        else:
+            try:
+                d = node.downloads.get(body.download_id or "")
+            except DownloadError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            if d.status != "completed" or not d.path or not Path(d.path).exists():
+                raise HTTPException(404, "The downloaded file is no longer there.")
+            path, reveal = Path(d.path), True
+        try:
+            open_in_file_manager(path, reveal)
+        except OSError as exc:
+            raise HTTPException(500, f"Could not open the folder: {exc}") from exc
         return {"ok": True}
 
     @app.post("/api/shutdown")

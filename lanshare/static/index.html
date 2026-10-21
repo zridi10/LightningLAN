@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LanShare</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+      <span class="brand-name">LanShare</span>
+    </div>
+    <div class="me">
+      <span class="me-label">You are</span>
+      <strong id="self-name" class="me-name">…</strong>
+      <span id="lock" class="lock" hidden title="A passphrase is set: only peers with the same passphrase are visible">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1h1zm2 0h6V7a3 3 0 0 0-6 0v3z"/></svg>
+        Passphrase
+      </span>
+    </div>
+    <div class="top-right">
+      <span id="peer-pill" class="pill pill-off" role="status" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span><span id="peer-count">0 peers online</span>
+      </span>
+      <button id="theme-toggle" class="icon-btn" type="button" title="Theme: automatic" aria-label="Switch colour theme">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="offline-banner" class="banner" hidden role="alert">
+    Lost contact with LanShare on this computer. Is it still running?
+  </div>
+
+  <main class="layout">
+    <section class="main-col">
+      <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
+           aria-label="Add files to the Common Space: drop files here or press Enter to choose files">
+        <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l5 5h-3v6h-4V8H7l5-5zM5 16h2v3h10v-3h2v5H5v-5z"/></svg>
+        <div>
+          <div class="drop-title">Drop files or folders here to share them</div>
+          <div class="drop-sub">or <span class="link-like">choose files</span> — they're copied into your shared folder</div>
+        </div>
+      </div>
+      <input id="file-input" type="file" multiple hidden>
+      <ul id="uploads" class="uploads" aria-label="Uploads"></ul>
+
+      <div class="section-head">
+        <h2>Common Space</h2>
+        <span id="file-summary" class="muted"></span>
+        <input id="filter" class="filter" type="search" placeholder="Filter by name…" aria-label="Filter files by name">
+      </div>
+      <div class="table-wrap">
+        <table id="files" class="files">
+          <thead>
+            <tr>
+              <th data-sort="name" aria-sort="ascending"><button type="button">Name<span class="arrow"></span></button></th>
+              <th data-sort="size" class="num"><button type="button">Size<span class="arrow"></span></button></th>
+              <th data-sort="owners"><button type="button">Owner(s)<span class="arrow"></span></button></th>
+              <th data-sort="mtime" class="hide-narrow"><button type="button">Modified<span class="arrow"></span></button></th>
+              <th class="action-col"><span class="sr-only">Download</span></th>
+            </tr>
+          </thead>
+          <tbody id="file-rows"></tbody>
+        </table>
+        <div id="files-empty" class="empty" hidden></div>
+      </div>
+    </section>
+
+    <aside class="side-col">
+      <section class="card">
+        <div class="card-head">
+          <h2>Downloads</h2>
+          <button id="clear-downloads" class="text-btn" type="button" hidden>Clear finished</button>
+        </div>
+        <ul id="downloads" class="downloads" aria-live="polite"></ul>
+        <p id="downloads-empty" class="empty small">Nothing downloaded yet. Pick a file from the Common Space.</p>
+        <div class="folder-line">
+          <span class="muted small">Saved to</span>
+          <code id="downloads-dir" class="path"></code>
+          <button class="text-btn" type="button" data-open="downloads">Open</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Peers</h2></div>
+        <ul id="peers" class="peers"></ul>
+        <p id="peers-empty" class="empty small">Looking for other computers running LanShare on your network…</p>
+        <div id="ignored" class="ignored" hidden></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Your shared folder</h2></div>
+        <div class="folder-line">
+          <code id="share-dir" class="path"></code>
+          <button class="text-btn" type="button" data-open="share">Open</button>
+        </div>
+        <p class="muted small" id="share-summary"></p>
+        <button id="quit" class="text-btn danger" type="button">Stop LanShare</button>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+  <div id="drag-overlay" class="drag-overlay" hidden><div>Drop to add to the Common Space</div></div>
+</body>
+</html>

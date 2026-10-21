@@ -159,6 +159,10 @@ class PeerProcess:
         with self.client() as c:
             return c.post(path, **kwargs)
 
+    def delete(self, path: str, **kwargs) -> httpx.Response:
+        with self.client() as c:
+            return c.delete(path, **kwargs)
+
     def online_peer_ids(self) -> set[str]:
         return {p["peer_id"] for p in self.get("/api/peers").json()["peers"]}
 
