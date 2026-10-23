@@ -27,9 +27,11 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
 - Zero setup: default folders and name, a free port, a tray / menu bar icon, and a Settings
   panel in the web page for everything else.
 
-**Just want to use it?** Download the app for Windows or Linux from the
-[latest release](https://github.com/zridi10/LightningLAN/releases/latest) and follow [INSTALL.md](INSTALL.md). No Python needed. The rest of this README
-is about running from source, building the app and publishing releases.
+**Just want to use it?** Download the app for Windows, Linux or Android from
+**[lightninglan.party](https://lightninglan.party)** (or the
+[latest release](https://github.com/zridi10/LightningLAN/releases/latest)) and follow
+[INSTALL.md](INSTALL.md). No Python needed. The rest of this README is about running from
+source, building the apps and publishing releases.
 
 ## Requirements (running from source)
 
@@ -195,7 +197,9 @@ plus single files picked with **Share files**, downloads from everyone with swar
 passes pieces on, and uses
 the same passphrase. Computers see the phone's files in ThunderCLOUD and the phone sees
 theirs; no computer has to relay anything. It shares in the background (with a notification
-and a **Stop** button) until you stop it. For now it is built from source: see
+and a **Stop** button) until you stop it. Install `LightningLAN-android.apk` from the
+[latest release](https://github.com/zridi10/LightningLAN/releases/latest) (Android 8 or newer;
+[INSTALL.md](INSTALL.md#android) has the steps). Building it yourself is described in
 [android/README.md](android/README.md).
 
 ### The phone page (any phone, in the browser)
@@ -464,9 +468,15 @@ binary runs on the glibc version it was built with or newer. CI builds it on Ubu
 ## Publishing a release
 
 `.github/workflows/release.yml` builds on native Windows and Linux runners, runs the unit tests
-and the smoke test on each, and attaches `LightningLAN.exe`, `LightningLAN-linux-x86_64` and
-`SHA256SUMS.txt` to a GitHub Release. A macOS entry is in the workflow but commented out
-until the Mac app has been tested on a Mac.
+and the smoke test on each, builds the Android app (after its core tests) and attaches
+`LightningLAN.exe`, `LightningLAN-linux-x86_64`, `LightningLAN-android.apk` and `SHA256SUMS.txt`
+to a GitHub Release. A macOS entry is in the workflow but commented out until the Mac app has
+been tested on a Mac.
+
+The APK is signed with the project's release key, which the workflow takes from the repository
+secrets `ANDROID_KEYSTORE_BASE64` (the PKCS12 keystore, base64) and `ANDROID_KEYSTORE_PASSWORD`;
+a tag build fails without them. Phones only install an update signed with the same key, so it
+must never change: keep a backup of the keystore outside the repository.
 
 1. Set `__version__` in `lightninglan/__init__.py` (for example `1.0.0`) and commit.
 2. Tag and push: `git tag v1.0.0 && git push origin v1.0.0`. The workflow fails early if the tag
@@ -523,8 +533,8 @@ android/         the Android app (Kotlin): see android/README.md
 ## Known limitations
 
 - Traffic is unencrypted HTTP (see Security).
-- The Android app is built from source for now (it isn't in the release downloads or on Google
-  Play). iPhones only have the phone page, so they can't share a folder of their own or
+- The Android app isn't on Google Play: it's installed from the APK in the release downloads.
+  iPhones only have the phone page, so they can't share a folder of their own or
   download while no computer runs LightningLAN.
 - Discovery only works within one network segment, and there is no "add a peer by IP address"
   option. IPv4 only.

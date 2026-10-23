@@ -12,6 +12,12 @@ val appVersion: String = Regex("__version__\\s*=\\s*\"([^\"]+)\"")
 val appVersionCode: Int = (appVersion.split(".").map { part -> part.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 } + listOf(0, 0, 0))
     .take(3).let { (major, minor, patch) -> major * 10_000 + minor * 100 + patch }
 
+// Release builds are signed with the keystore these two variables name (the release workflow sets
+// them from repository secrets; the key's alias is "lightninglan"). Without them, assembleRelease
+// makes an unsigned APK.
+val releaseKeystore: String? = System.getenv("LIGHTNINGLAN_KEYSTORE")
+val releaseKeystorePassword: String? = System.getenv("LIGHTNINGLAN_KEYSTORE_PASSWORD")
+
 android {
     namespace = "lightninglan.app"
     compileSdk = 35
@@ -24,11 +30,23 @@ android {
         versionName = appVersion
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = releaseKeystorePassword
+                keyAlias = "lightninglan"
+                keyPassword = releaseKeystorePassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 

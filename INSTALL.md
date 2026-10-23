@@ -6,16 +6,19 @@ sees the others' shared files.
 
 ## 1. Download
 
-Open <https://github.com/zridi10/LightningLAN/releases/latest> and, under **Assets**, download the file for your computer:
+Go to <https://lightninglan.party> and click the button for your device. Or open
+<https://github.com/zridi10/LightningLAN/releases/latest> and, under **Assets**, download the file:
 
-| Your computer | Download |
+| Your device | Download |
 | --- | --- |
 | Windows 10 or 11 | `LightningLAN.exe` |
 | Linux, 64-bit PC (Ubuntu 22.04 or newer, Debian 12, Fedora 36 or similar) | `LightningLAN-linux-x86_64` |
+| Android phone or tablet (Android 8 or newer) | `LightningLAN-android.apk` |
 
-There is no Mac version yet.
+There is no Mac or iPhone version yet. An iPhone can still join from its browser (see
+**On your phone** in section 3).
 
-LightningLAN doesn't need installing. It runs from wherever you put it.
+On a computer, LightningLAN doesn't need installing. It runs from wherever you put it.
 
 LightningLAN isn't signed with a paid developer certificate, so Windows will warn you the first
 time you open it. The steps below show you how to get past the warning. You only do this
@@ -60,6 +63,21 @@ once.
    sudo ufw allow 8765/tcp
    sudo ufw allow 5353/udp
    ```
+
+### Android
+
+1. Download `LightningLAN-android.apk` on the phone (the Android button on
+   <https://lightninglan.party>) and open it, from the browser's downloads or the Files app.
+2. Android asks whether your browser may install apps. Tap **Settings**, turn on
+   **Allow from this source**, go back and tap **Install**. If Google Play Protect warns about
+   an app it doesn't know, tap **More details**, then **Install anyway**.
+3. Open LightningLAN. It may ask to show notifications and, on Android 8 to 10, for access to
+   your files: allow both. It makes **Shared** and **Downloads** folders in the phone's
+   **Download/LightningLAN** folder and starts sharing right away, with a notification while it
+   runs. **Stop**, in the app or in the notification, ends it.
+
+A new version installs over the old one the same way. If you installed a LightningLAN app you
+built yourself, uninstall that first.
 
 ## 3. Using LightningLAN
 
@@ -135,7 +153,8 @@ Go through this list on **both** computers:
 
 ## Where LightningLAN keeps things
 
-- **Your files**: the Shared and Downloads folders, which you can change in Settings.
+- **Your files**: the Shared and Downloads folders, which you can change in Settings. On
+  Android they start out in the phone's **Download/LightningLAN** folder.
 - **Settings and log files**:
   - Windows: `%APPDATA%\LightningLAN`
   - Linux: `~/.config/lightninglan`
@@ -146,5 +165,5 @@ read-only ones.
 ## Uninstalling
 
 Quit LightningLAN and delete the app. If you also want to remove its settings, delete the
-settings folder listed above. Your **LightningLAN** folder (Shared and Downloads) contains your
+settings folder listed above. On Android, uninstall it like any other app. Your **LightningLAN** folder (Shared and Downloads) contains your
 files, so check it before deleting it.

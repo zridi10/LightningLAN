@@ -6,6 +6,9 @@ swarm downloads and passes pieces on, and honours the passphrase. It speaks the 
 the desktop app, so phones and computers see each other's files in ThunderCLOUD.
 
 Android 8.0 (API 26) or newer. iPhones can use the desktop app's phone page in the browser instead.
+To install it, download `LightningLAN-android.apk` from the
+[latest release](https://github.com/zridi10/LightningLAN/releases/latest) (see
+[INSTALL.md](../INSTALL.md#android)).
 
 ## Layout
 
@@ -39,8 +42,12 @@ The app is `app/build/outputs/apk/debug/app-debug.apk`. Install it with
 there (Android asks you to allow installing apps from that source once).
 
 Debug builds are signed with the SDK's debug key. A release build (`gradlew assembleRelease`)
-needs a signing key of your own, set up in `app/build.gradle.kts`; switching from a debug build
-to a release build means uninstalling the app first.
+is signed with the keystore that the `LIGHTNINGLAN_KEYSTORE` (its path) and
+`LIGHTNINGLAN_KEYSTORE_PASSWORD` environment variables name, key alias `lightninglan`; without
+them the APK is left unsigned. The release workflow signs the published APK with the project's
+key (kept in repository secrets, see "Publishing a release" in the main README). An app signed
+with another key, such as a debug build, can't update it or be updated by it: switching means
+uninstalling the app first.
 
 The app's version is read from `lightninglan/__init__.py`, so it always matches the desktop app.
 

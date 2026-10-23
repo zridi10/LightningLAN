@@ -1,4 +1,4 @@
-# Builds the desktop app on Windows and Linux and publishes a GitHub Release.
+# Builds the desktop app on Windows and Linux and the Android app, and publishes a GitHub Release.
 #
 # Push a tag such as v1.0.0 (it must match __version__ in lightninglan/__init__.py) to build and
 # release. "Run workflow" on the Actions tab builds without releasing; the files are then
@@ -65,9 +65,49 @@ jobs:
           path: ${{ matrix.asset }}
           if-no-files-found: error
 
+  android:
+    name: Build (Android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      # Releases are signed with the key in the ANDROID_KEYSTORE_BASE64 secret (a base64 PKCS12
+      # keystore, alias "lightninglan") and ANDROID_KEYSTORE_PASSWORD. Phones only accept an update
+      # signed with the same key, so it must never change.
+      - name: Test, build and sign the APK
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          LIGHTNINGLAN_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export LIGHTNINGLAN_KEYSTORE="$RUNNER_TEMP/release.jks"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "::error::The ANDROID_KEYSTORE_BASE64 secret is missing, so the APK can't be signed"
+            exit 1
+          fi
+          ./gradlew --no-daemon :core:test :app:assembleRelease
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release*.apk ../dist/LightningLAN-android.apk
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LightningLAN-Android
+          path: dist/LightningLAN-android.apk
+          if-no-files-found: error
+
   release:
     name: Publish the GitHub Release
-    needs: build
+    needs: [build, android]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -87,16 +127,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<EOF
-          **Download the file for your computer:**
+          **Download the file for your computer or phone:**
 
-          | Computer | File |
+          | Device | File |
           | --- | --- |
           | Windows 10 or 11 | \`LightningLAN.exe\` |
           | Linux (64-bit PC) | \`LightningLAN-linux-x86_64\` |
+          | Android 8 or newer | \`LightningLAN-android.apk\` |
 
-          There is no Mac version yet.
+          There is no Mac version yet. iPhones can join from the browser: scan the QR code in
+          LightningLAN on a computer.
 
-          First time? The app is not signed, so Windows will warn you before opening it.
+          First time? The app is not signed, so Windows will warn you before opening it, and
+          Android asks you to allow installing apps from your browser.
           [INSTALL.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/INSTALL.md)
           explains each step in plain language.
           EOF
