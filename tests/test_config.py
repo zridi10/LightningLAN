@@ -4,6 +4,7 @@ import socket
 import pytest
 
 from lightninglan.config import ConfigError, clean_display_name, load_settings
+from lightninglan.names import FUNNY_NAMES, random_name
 
 
 def test_peer_id_is_generated_once_and_persisted(tmp_path):
@@ -46,9 +47,26 @@ def test_passphrase_from_config_file(tmp_path):
     assert load_settings(cfg, passphrase="override").passphrase == "override"
 
 
-def test_default_name_is_hostname(tmp_path):
+def test_default_name_is_a_funny_name_that_sticks(tmp_path):
     s = load_settings(tmp_path / "c.json", share=tmp_path / "s", downloads=tmp_path / "d")
-    assert s.name == socket.gethostname()
+    assert s.name in FUNNY_NAMES
+    again = load_settings(tmp_path / "c.json")
+    assert again.name == s.name, "the random name is remembered"
+
+
+def test_peers_without_a_saved_name_get_one(tmp_path):
+    # Older configs have no "name" (the computer's name was used); they get a funny one too.
+    (tmp_path / "c.json").write_text('{"peer_id": "%s"}' % ("a" * 32))
+    s = load_settings(tmp_path / "c.json", share=tmp_path / "s", downloads=tmp_path / "d")
+    assert s.name in FUNNY_NAMES
+    assert load_settings(tmp_path / "c.json", name="Den PC").name == "Den PC"
+    assert load_settings(tmp_path / "c.json").name == "Den PC", "a chosen name is kept"
+
+
+def test_random_name_avoids_names_in_use():
+    taken = FUNNY_NAMES[:-1]
+    assert random_name(taken) == FUNNY_NAMES[-1]
+    assert random_name([n.upper() for n in FUNNY_NAMES]) in FUNNY_NAMES  # all taken: any will do
 
 
 def test_clean_display_name():

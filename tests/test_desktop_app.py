@@ -51,16 +51,15 @@ needs_tray = pytest.mark.skipif(pystray is None, reason=globals().get("_no_tray_
 def tray(tmp_path, monkeypatch):
     from lightninglan import tray as tray_module
 
-    opened, urls, quits = [], [], []
+    opened, shown, quits = [], [], []
     monkeypatch.setattr(tray_module, "open_in_file_manager", lambda path, reveal=False: opened.append(path))
-    monkeypatch.setattr(tray_module, "open_url", lambda url: urls.append(url) or True)
     settings = SimpleNamespace(name="Den PC", share_dir=tmp_path / "share", downloads_dir=tmp_path / "dl")
     node = SimpleNamespace(settings=settings, peers=SimpleNamespace(online=lambda: ["peer"] * 2), online=True)
     try:
-        t = tray_module.Tray(node, "http://localhost:8765", tmp_path / "logs", lambda: quits.append(True))
+        t = tray_module.Tray(node, lambda: shown.append(True), tmp_path / "logs", lambda: quits.append(True))
     except Exception as exc:  # e.g. a Linux CI runner with no X display
         pytest.skip(f"no tray backend: {exc}")
-    t.calls = SimpleNamespace(opened=opened, urls=urls, quits=quits)
+    t.calls = SimpleNamespace(opened=opened, shown=shown, quits=quits)
     return t
 
 
@@ -81,7 +80,7 @@ def test_tray_menu(tray):
 def test_tray_actions(tray, tmp_path):
     items = {item.text: item for item in menu_items(tray)}
     items["Open LightningLAN"](tray.icon)
-    assert tray.calls.urls == ["http://localhost:8765"]
+    assert tray.calls.shown == [True]  # the app window, or the browser
     items["Open Shared Folder"](tray.icon)
     items["Open Downloads Folder"](tray.icon)
     items["Open Log Folder"](tray.icon)
@@ -108,3 +107,90 @@ def test_tray_tooltip(tray):
     assert tray.title() == "LightningLAN: Den PC (2 peers online)"
     tray.node.online = False  # Stop pressed, or the web UI was closed
     assert tray.title() == "LightningLAN: Den PC (stopped)"
+
+
+# ----- the app window (Windows) ---------------------------------------------------------------
+
+class FakeWebview:
+    """Stands in for a pywebview window: records what the app window asks of it."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        return lambda *args: self.calls.append((name, *args))
+
+
+def app_window(tmp_path):
+    from lightninglan.window import AppWindow
+
+    w = AppWindow("http://localhost:8765", tmp_path / "window")
+    w._window = FakeWebview()
+    return w
+
+
+def call_names(w, start=0):
+    return [c[0] for c in w._window.calls[start:]]
+
+
+def test_closing_the_window_hides_it_and_leaves_the_page(tmp_path):
+    from .harness import wait_for
+
+    w = app_window(tmp_path)
+    assert w._on_closing() is False  # the window isn't closed, only hidden
+    wait_for(lambda: len(w._window.calls) == 2, timeout=5, message="the window to hide")
+    assert call_names(w) == ["hide", "load_html"]  # leaving the page ends the web UI's session
+    assert w.show() is True  # opening LightningLAN again
+    assert call_names(w, 2) == ["load_url", "show"]
+    assert w._window.calls[2][1] == "http://localhost:8765"
+    assert w.show() is True  # already showing the page: no reload
+    assert call_names(w, 4) == ["show"]
+
+
+def test_a_minimized_window_is_restored_when_shown(tmp_path):
+    w = app_window(tmp_path)
+    w._set_minimized(True)
+    w.show()
+    assert call_names(w) == ["show", "restore"]
+
+
+def test_quitting_closes_the_window_for_good(tmp_path):
+    w = app_window(tmp_path)
+    fake = w._window
+    w.destroy()
+    assert fake.calls == [("destroy",)]
+    assert w._on_closing() is True
+
+
+def test_without_a_window_the_browser_opens(tmp_path):
+    from lightninglan.cli import _make_window
+    from lightninglan.window import AppWindow
+
+    assert AppWindow("http://localhost:8765", tmp_path).show() is False  # not running: the caller opens the browser
+    settings = SimpleNamespace(open_browser=True, state_dir=tmp_path)
+    assert _make_window(settings, "http://localhost:8765", gui=False) is None  # from source or a terminal
+    settings.open_browser = False
+    assert _make_window(settings, "http://localhost:8765", gui=True) is None  # --no-browser
+
+
+def test_starting_again_shows_the_app_window(peer):
+    from .conftest import LAN_CLIENT
+
+    ui = {"X-LightningLAN-Client": "ui"}
+    assert peer.post("/api/show-window", headers=ui).json() == {"shown": False}  # browser mode
+    shown = []
+    peer.app.state.show_window = lambda: shown.append(True) or True
+    assert peer.post("/api/show-window", headers=ui).json() == {"shown": True}
+    assert shown == [True]
+    assert peer.post("/api/show-window", headers=ui, client=LAN_CLIENT).status_code == 403
+    assert peer.post("/api/show-window").status_code == 403  # needs the client header
+
+
+@pytest.mark.integration
+def test_a_second_launch_asks_the_running_copy(spawn):
+    from lightninglan.cli import _show_running_window
+    from .harness import free_port
+
+    a = spawn("A")
+    assert _show_running_window(a.url) is False  # it runs without a window: the browser opens instead
+    assert _show_running_window(f"http://127.0.0.1:{free_port()}") is False  # nothing there

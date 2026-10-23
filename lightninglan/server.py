@@ -12,14 +12,18 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
+from . import __version__
 from .desktop import FolderPickerError, open_in_file_manager, pick_folder
 from .logs import log_dir
+from .names import random_name
 from .node import STOPPED, Node, SettingsError
+from .phone import COOKIE as PHONE_COOKIE, COOKIE_MAX_AGE, hold_session, phone_links, relay_download
 from .resources import static_dir
 from .security import AccessControlMiddleware, SecurityHeadersMiddleware
 from .serving import serve_download, serve_piece
@@ -80,8 +84,42 @@ def create_app(node: Node) -> FastAPI:
     app.state.node = node
     app.state.request_shutdown = None
     app.state.exiting = lambda: False  # the server sets this up to report that it is shutting down
-    app.add_middleware(AccessControlMiddleware, auth=node.auth, online=lambda: node.online)
+    app.state.show_window = None  # shows the app window, when the web UI runs in one (Windows app)
+    app.add_middleware(AccessControlMiddleware, auth=node.auth, online=lambda: node.online,
+                       phone_key_ok=node.phone_key_matches)
     app.add_middleware(SecurityHeadersMiddleware)  # outermost: applies to rejections too
+
+    def session_stream(request: Request, opened, closed, valid=lambda: True) -> StreamingResponse:
+        """Server-sent events that say whether this peer is online (and how many phones are open),
+        held open by a page for as long as it is showing. opened/closed count it in and out; it
+        ends when valid() turns false."""
+        exiting = request.app.state.exiting
+
+        async def events():
+            opened()
+            try:
+                seen, quiet = None, 0.0
+                while not exiting() and valid():
+                    now = (node.state_version, node.phones)
+                    if now != seen:
+                        seen, quiet = now, 0.0
+                        yield f"data: {json.dumps({'online': node.online})}\n\n"
+                    elif quiet >= SESSION_PING:
+                        quiet = 0.0
+                        yield ": ping\n\n"
+                    await asyncio.sleep(SESSION_TICK)
+                    quiet += SESSION_TICK
+            finally:
+                closed()
+
+        return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+    def common_response(request: Request) -> Response:
+        body, etag = node.common_payload()
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
 
     # ----- LAN-facing, read-only --------------------------------------------------------
 
@@ -119,7 +157,7 @@ def create_app(node: Node) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        log.info("web UI opened in a browser")
+        log.info("web UI opened")
         return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -142,35 +180,14 @@ def create_app(node: Node) -> FastAPI:
 
     @app.get("/api/ui-session")
     async def ui_session(request: Request) -> StreamingResponse:
-        """Held open by the web UI (one tab at a time). When no tab has it open for a while, this
-        peer goes offline, and opening the UI again brings it back. It also reports Stop and Start."""
-        exiting = request.app.state.exiting
-
-        async def events():
-            node.ui_opened()
-            try:
-                seen, quiet = None, 0.0
-                while not exiting():
-                    if node.state_version != seen:
-                        seen, quiet = node.state_version, 0.0
-                        yield f"data: {json.dumps({'online': node.online})}\n\n"
-                    elif quiet >= SESSION_PING:
-                        quiet = 0.0
-                        yield ": ping\n\n"
-                    await asyncio.sleep(SESSION_TICK)
-                    quiet += SESSION_TICK
-            finally:
-                node.ui_closed()
-
-        return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+        """Held open by the web UI (one tab at a time). When no tab (or phone) has it open for a
+        while, this peer goes offline, and opening the UI again brings it back. It also reports
+        Stop and Start, and phones connecting."""
+        return session_stream(request, node.ui_opened, node.ui_closed)
 
     @app.get("/api/common")
     def common_space(request: Request) -> Response:
-        body, etag = node.common_payload()
-        headers = {"ETag": etag, "Cache-Control": "no-cache"}
-        if etag_matches(request.headers.get("if-none-match"), etag):
-            return Response(status_code=304, headers=headers)
-        return Response(body, media_type="application/json", headers=headers)
+        return common_response(request)
 
     @app.get("/api/peers")
     def peers() -> dict:
@@ -241,6 +258,11 @@ def create_app(node: Node) -> FastAPI:
     def get_settings() -> dict:
         return node.settings_payload()
 
+    @app.get("/api/random-name")
+    def suggest_name() -> dict:
+        """A funny name for the dice button: not ours, and not one an online peer uses."""
+        return {"name": random_name([node.name] + [p.name for p in node.peers.online()])}
+
     @app.post("/api/settings")
     async def update_settings(body: SettingsUpdate) -> dict:
         try:
@@ -283,6 +305,12 @@ def create_app(node: Node) -> FastAPI:
             raise HTTPException(500, f"Could not open the folder: {exc}") from exc
         return {"ok": True}
 
+    @app.post("/api/show-window")
+    def show_window(request: Request) -> dict:
+        """LightningLAN was started again while running: show the app window, if there is one."""
+        show = request.app.state.show_window
+        return {"shown": bool(show is not None and show())}
+
     @app.post("/api/shutdown")
     async def shutdown(request: Request) -> dict:
         stop = request.app.state.request_shutdown
@@ -290,5 +318,76 @@ def create_app(node: Node) -> FastAPI:
             return {"ok": False, "detail": "shutdown is not available in this mode"}
         asyncio.get_running_loop().call_later(0.2, stop)
         return {"ok": True}
+
+    async def phone_setup(new_key: bool = False) -> dict:
+        try:
+            key = await node.ensure_phone_key(new=new_key)
+        except SettingsError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        links = await asyncio.to_thread(phone_links, await node.phone_addresses(), node.settings.port, key)
+        return {"links": links, "phones": node.phones}
+
+    @app.get("/api/phone")
+    async def phone_link() -> dict:
+        """The phone link and its QR code, for the web UI's phone dialog."""
+        return await phone_setup()
+
+    @app.post("/api/phone/new-key")
+    async def new_phone_key() -> dict:
+        """Disconnect every phone: the old link and QR code stop working."""
+        return await phone_setup(new_key=True)
+
+    # ----- the phone page (on the LAN, for phones paired with the QR code) ------------------
+
+    @app.get("/phone", include_in_schema=False)
+    def phone_page(request: Request, key: str | None = None) -> Response:
+        if key is not None:
+            # Opened from the QR code: keep the key in a cookie, and take it out of the address bar.
+            if not node.phone_key_matches(key):
+                return RedirectResponse("/phone#expired", status_code=303)
+            response = RedirectResponse("/phone", status_code=303)
+            response.set_cookie(PHONE_COOKIE, key, max_age=COOKIE_MAX_AGE, path="/", httponly=True, samesite="lax")
+            log.info("a phone was paired from %s", request.client.host if request.client else "?")
+            return response
+        return FileResponse(STATIC_DIR / "phone.html", media_type="text/html")
+
+    @app.get("/phone/api/status")
+    def phone_status() -> dict:
+        return {
+            "name": node.name,
+            "version": __version__,
+            "online": node.online,
+            "offline_reason": node.offline_reason,
+            "peers_online": len(node.peers.online()),
+        }
+
+    @app.get("/phone/api/session")
+    async def phone_session(request: Request) -> StreamingResponse:
+        key = request.cookies.get(PHONE_COOKIE)  # "Disconnect phones" replaces the key: then this ends
+        return session_stream(request, node.phone_opened, node.phone_closed, lambda: node.phone_key_matches(key))
+
+    @app.get("/phone/api/files")
+    def phone_files(request: Request) -> Response:
+        return common_response(request)
+
+    @app.api_route("/phone/api/file/{file_id}", methods=["GET", "HEAD"])
+    async def phone_download(file_id: str, request: Request) -> Response:
+        if not node.online:
+            raise HTTPException(409, f"LightningLAN is stopped on {node.name}. Start it there first.")
+        if node.indexer.lookup(file_id) is not None:
+            response = await run_in_threadpool(serve_download, node.indexer, file_id, request, node.uploads)
+        else:
+            response = await relay_download(node, file_id, request)
+        return hold_session(node, response)
+
+    @app.post("/phone/api/upload", status_code=201)
+    async def phone_upload(request: Request, name: str, mtime: float | None = None):
+        try:
+            result = await receive_upload(request, node.settings.share_dir, name, mtime)
+        except ClientDisconnect:
+            return Response(status_code=400)
+        node.indexer.request_rescan()
+        log.info("a phone added %s to the shared folder", result["name"])
+        return result
 
     return app

@@ -30,7 +30,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build"
 DIST = ROOT / "dist"
-REQUIRED_MODULES = ("fastapi", "uvicorn", "zeroconf", "httpx", "pystray", "PIL", "PyInstaller")
+REQUIRED_MODULES = ("fastapi", "uvicorn", "zeroconf", "httpx", "pystray", "PIL", "segno", "PyInstaller") + (
+    ("webview",) if sys.platform == "win32" else ()
+)
 
 
 # ----- environment -----------------------------------------------------------------------------
@@ -152,6 +154,18 @@ def http(method: str, url: str) -> tuple[int, bytes]:
         return resp.status, resp.read()
 
 
+def check_window_support(command: list[str]) -> None:
+    """The Windows app's own window: pywebview, pythonnet and WebView2 load from inside the bundle."""
+    result = subprocess.run(command + ["--check-window"], capture_output=True, text=True, timeout=120)
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode == 3:
+        print("  app window: WebView2 is not installed on this machine, so it couldn't be checked", flush=True)
+        return
+    if result.returncode != 0:
+        raise RuntimeError(f"the app window doesn't work in the build (exit code {result.returncode}):\n{output}")
+    print("  app window (WebView2) loads", flush=True)
+
+
 def smoke_test(command: list[str]) -> None:
     """Start the built app in a scratch folder and check the web UI, indexing and shutdown."""
     with tempfile.TemporaryDirectory(prefix="lightninglan-smoke-") as tmp:
@@ -187,8 +201,15 @@ def smoke_test(command: list[str]) -> None:
             print("  status:", json.loads(body)["name"], flush=True)
             status, page = http("GET", f"{base}/")
             assert status == 200 and b'id="drop-zone"' in page, "the web UI page is missing"
-            for asset in ("app.js", "style.css", "favicon.svg"):
+            for asset in ("app.js", "style.css", "favicon.svg", "phone.js"):
                 assert http("GET", f"{base}/static/{asset}")[0] == 200, f"{asset} is missing"
+            status, page = http("GET", f"{base}/phone")
+            assert status == 200 and b'id="file-list"' in page, "the phone page is missing"
+            assert http("GET", f"{base}/api/phone")[0] == 200, "the phone QR code doesn't work (segno missing?)"
+            status, body = http("POST", f"{base}/api/show-window")
+            assert status == 200 and json.loads(body) == {"shown": False}, "unexpected app window answer"
+            if sys.platform == "win32":
+                check_window_support(command)
             deadline = time.monotonic() + 30
             while True:
                 files = json.loads(http("GET", f"{base}/api/files")[1])["files"]

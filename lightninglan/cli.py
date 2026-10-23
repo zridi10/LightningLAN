@@ -1,13 +1,14 @@
 """Entry point for `python -m lightninglan` and for the packaged desktop app.
 
 With no arguments it runs zero-config: default folders, the computer's name, port 8765 (or the
-next free one), a tray icon, and the web UI opened in the browser. Launching it again while it
-runs just opens the web UI of the running copy.
+next free one), a tray icon, and the web UI opened in the browser (in the packaged Windows app,
+in a window of its own). Launching it again while it runs just shows the web UI of the running copy.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import signal
@@ -15,6 +16,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import uvicorn
@@ -73,6 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
     p.add_argument("--no-tray", action="store_true", help="no tray icon and no pop-up messages (servers, scripts)")
     p.add_argument("--verbose", "-v", action="store_true", help="log requests and debug output")
+    # For build.py's smoke test: can the app window be made here? Exit code 0 yes, 3 no WebView2, 4 broken.
+    p.add_argument("--check-window", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--version", action="version", version=f"LightningLAN {__version__}")
     return p
 
@@ -153,14 +157,14 @@ def print_banner(settings: Settings, addresses: list[str]) -> None:
     )
 
 
-def _after_start(server: uvicorn.Server, node: Node, url: str) -> None:
+def _after_start(server: uvicorn.Server, node: Node, url: str, open_browser: bool) -> None:
     settings = node.settings
     while not server.started:
         if server.should_exit:
             return
         time.sleep(0.05)
     print_banner(settings, node.discovery.addresses if node.discovery else [])
-    if settings.open_browser:
+    if open_browser:
         if open_url(url):
             log.info("opened %s in the default browser", url, extra=FILE_ONLY)
         else:
@@ -198,6 +202,12 @@ def main(argv: list[str] | None = None) -> int:
     gui = _gui_mode(args)
     setup_console_logging(args.verbose)
     _prepare_streams()
+    if args.check_window:
+        from .window import NO_WEBVIEW2, window_problem
+
+        problem = window_problem()
+        print(f"app window: {problem or 'available'}", flush=True)
+        return 0 if problem is None else 3 if problem == NO_WEBVIEW2 else 4
     restore_library_path()
     log_uncaught_exceptions()
     try:
@@ -233,7 +243,7 @@ def _run(args: argparse.Namespace, gui: bool) -> int:
             ) from exc
         settings.port = sock.getsockname()[1]
         lock.publish(settings.port, settings.peer_id)
-        _serve(settings, sock, args)
+        _serve(settings, sock, args, gui)
         log.info("LightningLAN stopped", extra=FILE_ONLY)
         return 0
     finally:
@@ -250,12 +260,28 @@ def _hand_over(state_dir: Path, args: argparse.Namespace) -> int:
             1,
         )
     print(f"LightningLAN is already running: {url}", flush=True)
-    if not args.no_browser:
+    if not args.no_browser and not _show_running_window(url):
         open_url(url)
     return 0
 
 
-def _serve(settings: Settings, sock: socket.socket, args: argparse.Namespace) -> None:
+def _show_running_window(url: str) -> bool:
+    """Ask the running copy to show its app window. False if it has none (it uses the browser)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY: it may come to the front
+    request = urllib.request.Request(
+        f"{url}/api/show-window", data=b"", method="POST", headers={"X-LightningLAN-Client": "launcher"},
+    )
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=10) as resp:
+            return json.loads(resp.read()).get("shown") is True
+    except (OSError, ValueError):  # an older copy without this, or it is shutting down
+        return False
+
+
+def _serve(settings: Settings, sock: socket.socket, args: argparse.Namespace, gui: bool) -> None:
     node = Node(settings)
     app = create_app(node)
     config = uvicorn.Config(
@@ -273,9 +299,19 @@ def _serve(settings: Settings, sock: socket.socket, args: argparse.Namespace) ->
     app.state.request_shutdown = request_shutdown
     app.state.exiting = lambda: server.should_exit  # lets the web UI's open session end promptly
     url = f"http://localhost:{settings.port}"
-    tray = None if args.no_tray else _make_tray(node, url, request_shutdown)
-    threading.Thread(target=_after_start, args=(server, node, url), daemon=True).start()
-    if tray is None:
+    window = _make_window(settings, url, gui)
+    app.state.show_window = window.show if window is not None else None
+
+    def open_ui() -> None:
+        if window is None or not window.show():
+            open_url(url)
+
+    tray = None if args.no_tray else _make_tray(node, open_ui, request_shutdown)
+    open_browser = settings.open_browser and window is None
+    threading.Thread(target=_after_start, args=(server, node, url, open_browser), daemon=True).start()
+    if window is not None:
+        _serve_with_window(server, sock, tray, window, url)
+    elif tray is None:
         server.run(sockets=[sock])
     elif sys.platform == "darwin":
         _serve_with_tray_on_main_thread(server, sock, tray)
@@ -287,17 +323,56 @@ def _serve(settings: Settings, sock: socket.socket, args: argparse.Namespace) ->
             tray.stop()
 
 
-def _make_tray(node: Node, url: str, request_shutdown):
+def _make_window(settings: Settings, url: str, gui: bool):
+    """The app window, for the packaged Windows app started from the desktop; None means the browser."""
+    if not (gui and settings.open_browser):
+        return None
+    from .window import AppWindow, window_supported
+
+    if not window_supported():
+        return None
+    return AppWindow(url, settings.state_dir / "window")
+
+
+def _make_tray(node: Node, open_ui, request_shutdown):
     from .tray import Tray, tray_supported
 
     if not tray_supported():
         log.info("no desktop session: running without a tray icon")
         return None
     try:
-        return Tray(node, url, log_dir(node.settings.state_dir), request_shutdown)
+        return Tray(node, open_ui, log_dir(node.settings.state_dir), request_shutdown)
     except Exception:
         log.warning("the tray icon is not available; use the web UI instead", exc_info=True)
         return None
+
+
+def _serve_with_window(server: uvicorn.Server, sock: socket.socket, tray, window, url: str) -> None:
+    """Windows app window: it must own the main thread, so the web server runs on another one."""
+    server_thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, name="lightninglan-server")
+    server_thread.start()
+
+    def close_window_when_server_ends() -> None:
+        server_thread.join()
+        window.destroy()
+
+    threading.Thread(target=close_window_when_server_ends, name="lightninglan-window-stop", daemon=True).start()
+    if tray is not None:
+        tray.start()
+    try:
+        while not server.started and server_thread.is_alive():
+            time.sleep(0.05)
+        if server_thread.is_alive():
+            log.info("opening the app window")
+            try:
+                window.run()  # until LightningLAN quits
+            except Exception:
+                log.warning("the app window is not available; using the browser instead", exc_info=True)
+                open_url(url)
+        server_thread.join()
+    finally:
+        if tray is not None:
+            tray.stop()
 
 
 def _serve_with_tray_on_main_thread(server: uvicorn.Server, sock: socket.socket, tray) -> None:

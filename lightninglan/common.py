@@ -1,4 +1,4 @@
-"""The Common Space: one list of every file shared by this peer and all online peers.
+"""ThunderCLOUD: one list of every file shared by this peer and all online peers.
 
 Files are keyed by SHA-256, so identical content shared by several peers (even under
 different names) is shown once with every source listed.

@@ -23,7 +23,8 @@ BUNDLE_ID = "io.lightninglan.LightningLAN"
 # cannot import pystray to find them, so they are listed here.
 hiddenimports = collect_submodules("zeroconf") + collect_submodules("lightninglan")
 if sys.platform == "win32":
-    hiddenimports += ["pystray._win32"]
+    # pywebview loads its Windows backend (the app window, in Edge WebView2) at run time.
+    hiddenimports += ["pystray._win32", "webview.platforms.winforms", "webview.platforms.edgechromium"]
 elif sys.platform == "darwin":
     hiddenimports += ["pystray._darwin"]
 else:

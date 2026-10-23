@@ -7,3 +7,10 @@ build/
 dist/
 .coverage
 htmlcov/
+
+# Android (android/)
+.gradle/
+.kotlin/
+local.properties
+.idea/
+*.iml

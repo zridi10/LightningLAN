@@ -138,11 +138,14 @@ def test_upload_from_loopback_variants_is_allowed(peer, client):
 @pytest.mark.parametrize("client", [("192.168.1.50", 1), ("10.0.0.2", 1), ("::ffff:192.168.1.5", 1),
                                     ("fe80::1", 1), ("testclient", 1)])
 def test_ui_endpoints_refuse_non_local_clients(peer, client):
-    for method, path in [("GET", "/"), ("GET", "/api/status"), ("GET", "/api/common"), ("GET", "/api/peers"),
+    for method, path in [("GET", "/api/status"), ("GET", "/api/common"), ("GET", "/api/peers"),
                          ("GET", "/api/downloads"), ("POST", "/api/downloads"), ("POST", "/api/shutdown"),
-                         ("POST", "/api/upload?name=a.txt")]:
+                         ("POST", "/api/upload?name=a.txt"), ("GET", "/api/phone"), ("POST", "/api/show-window")]:
         r = peer.request(method, path, client=client, headers=UI)
         assert r.status_code == 403, (method, path, client)
+    # The page itself isn't served to other devices: they are sent to the phone page instead.
+    r = peer.get("/", client=client)
+    assert r.status_code == 307 and r.headers["location"] == "/phone"
 
 
 def test_lan_routes_are_open_to_the_lan(peer):
@@ -208,7 +211,7 @@ def test_upload_via_lan_address_is_forbidden(spawn):
     with httpx.Client(base_url=url, headers=UI, trust_env=False, timeout=10) as c:
         assert c.post("/api/upload", params={"name": "x.txt"}, content=b"x").status_code == 403
         assert c.get("/api/status").status_code == 403
-        assert c.get("/").status_code == 403
+        assert c.get("/").headers.get("location") == "/phone"  # the phone page, not this computer's UI
         assert c.get("/api/files").status_code == 200
     assert list(a.share.iterdir()) == []
 

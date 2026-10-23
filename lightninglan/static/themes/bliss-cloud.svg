@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120">
+  <defs>
+    <linearGradient id="puff" gradientUnits="userSpaceOnUse" x1="0" y1="14" x2="0" y2="110">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.7" stop-color="#f4f9ff"/>
+      <stop offset="1" stop-color="#d6e6f5"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#puff)">
+    <circle cx="70" cy="72" r="34"/>
+    <circle cx="112" cy="54" r="42"/>
+    <circle cx="160" cy="66" r="34"/>
+    <circle cx="194" cy="82" r="24"/>
+    <rect x="38" y="72" width="178" height="36" rx="18"/>
+  </g>
+</svg>

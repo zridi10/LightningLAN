@@ -11,7 +11,9 @@
   var ACTIVE = { queued: true, downloading: true, verifying: true };
   var JUNK = { 'thumbs.db': true, 'ehthumbs.db': true, 'desktop.ini': true, '.ds_store': true };
   var TEMP_SUFFIXES = ['.part', '.partial', '.crdownload', '.tmp'];
-  var THEMES = ['auto', 'light', 'dark'];
+  var THEMES = ['auto', 'light', 'dark', 'synthwave', 'bliss', 'deepsea'];  // the theme button cycles through these
+  var THEME_NAMES = { auto: 'automatic', light: 'light', dark: 'dark', synthwave: 'Synthwave', bliss: 'Bliss',
+    deepsea: 'Deep Sea' };
 
   var state = {
     status: null,
@@ -106,13 +108,15 @@
   // ----- theme ----------------------------------------------------------------------------
 
   function storedTheme() {
-    try { return localStorage.getItem('lightninglan-theme') || 'auto'; } catch (e) { return 'auto'; }
+    var mode = 'auto';
+    try { mode = localStorage.getItem('lightninglan-theme') || 'auto'; } catch (e) { /* private mode */ }
+    return THEMES.indexOf(mode) === -1 ? 'auto' : mode;
   }
 
   function applyTheme(mode) {
     if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', mode);
-    var label = 'Theme: ' + (mode === 'auto' ? 'automatic' : mode);
+    var label = 'Theme: ' + THEME_NAMES[mode];
     $('theme-toggle').title = label;
     $('theme-toggle').setAttribute('aria-label', label + ' (click to change)');
   }
@@ -121,6 +125,7 @@
     var next = THEMES[(THEMES.indexOf(storedTheme()) + 1) % THEMES.length];
     try { localStorage.setItem('lightninglan-theme', next); } catch (e) { /* private mode */ }
     applyTheme(next);
+    toast('Theme: ' + THEME_NAMES[next]);
   }
 
   // ----- header and status ----------------------------------------------------------------
@@ -145,7 +150,55 @@
     $('share-summary').textContent = summary;
     $('welcome').hidden = !(s.first_run && !welcomeDismissed());
     $('welcome-share').textContent = s.share_dir;
+    $('welcome-name').textContent = s.name;
     renderSharing();
+    renderPhones();
+  }
+
+  // ----- your name, edited in place at the top ---------------------------------------------
+
+  function startNameEdit() {
+    var input = $('name-input');
+    input.value = state.status ? state.status.name : '';
+    $('self-name').hidden = true;
+    $('name-edit').hidden = true;
+    $('name-form').hidden = false;
+    input.focus();
+    input.select();
+  }
+
+  function endNameEdit() {
+    $('name-form').hidden = true;
+    $('self-name').hidden = false;
+    $('name-edit').hidden = false;
+  }
+
+  async function saveName(e) {
+    e.preventDefault();
+    var name = $('name-input').value.trim();
+    if (state.status && name === state.status.name) { endNameEdit(); return; }
+    var save = $('name-save');
+    save.disabled = true;
+    try {
+      var result = await api('POST', '/api/settings', { name: name });
+      endNameEdit();
+      toast('You are now ' + result.settings.name + '.', 'ok');
+      refreshStatus().catch(function () {});
+    } catch (err) {
+      toast(err.message, 'error');
+      $('name-input').focus();
+    } finally {
+      save.disabled = false;
+    }
+  }
+
+  async function rollName() {
+    try {
+      $('name-input').value = (await api('GET', '/api/random-name')).name;
+    } catch (e) {
+      toast('Could not pick a name: ' + e.message, 'error');
+    }
+    $('name-input').focus();
   }
 
   // ----- Stop and Start -------------------------------------------------------------------
@@ -189,6 +242,99 @@
     var banner = $('offline-banner');
     banner.textContent = 'LightningLAN has quit. You can close this tab.';
     banner.hidden = false;
+  }
+
+  // ----- phones ---------------------------------------------------------------------------
+  // The phone dialog shows a QR code with a link to the phone page, which LightningLAN serves to
+  // phones on the same Wi-Fi. The link holds a secret key, so only phones that scanned it get in;
+  // "Disconnect phones" replaces the key.
+
+  var phoneLinks = [];
+  var phonesSeen = 0;
+
+  function drawQr(rows) {
+    var qr = $('phone-qr');
+    var size = rows.length + 8;  // a quiet zone of four modules all round
+    qr.textContent = '';
+    qr.setAttribute('viewBox', '0 0 ' + size + ' ' + size);
+    qr.appendChild(svg('rect', { width: size, height: size, fill: '#ffffff' }));
+    var d = '';
+    rows.forEach(function (row, y) {
+      for (var x = 0; x < row.length; x++) {
+        if (row[x] !== '1') continue;
+        var run = 1;
+        while (row[x + run] === '1') run++;
+        d += 'M' + (x + 4) + ' ' + (y + 4) + 'h' + run + 'v1h-' + run + 'z';
+        x += run - 1;
+      }
+    });
+    qr.appendChild(svg('path', { d: d, fill: '#000000', 'shape-rendering': 'crispEdges' }));
+  }
+
+  function showPhoneLink() {
+    var link = phoneLinks[$('phone-address').selectedIndex] || phoneLinks[0];
+    $('phone-no-network').hidden = !!link;
+    $('qr-box').hidden = !link;
+    $('phone-url').textContent = link ? link.url : '';
+    if (link) drawQr(link.qr);
+  }
+
+  function fillPhoneDialog(data) {
+    var select = $('phone-address');
+    var previous = select.value;
+    phoneLinks = data.links;
+    select.textContent = '';
+    phoneLinks.forEach(function (link) {
+      var option = el('option', '', link.address);
+      option.value = link.address;
+      option.selected = link.address === previous;
+      select.appendChild(option);
+    });
+    $('phone-address-row').hidden = phoneLinks.length < 2;
+    showPhoneLink();
+  }
+
+  async function openPhone() {
+    try {
+      fillPhoneDialog(await api('GET', '/api/phone'));
+    } catch (e) {
+      toast('Could not set up the phone link: ' + e.message, 'error');
+      return;
+    }
+    renderPhones();
+    var dialog = $('phone-dialog');
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+
+  function closePhone() {
+    var dialog = $('phone-dialog');
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
+  async function newPhoneKey() {
+    if (!window.confirm('Disconnect every phone? To connect again, a phone has to scan the new QR code.')) return;
+    try {
+      fillPhoneDialog(await api('POST', '/api/phone/new-key'));
+      toast('Phones disconnected. The QR code is new.', 'ok');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  function renderPhones() {
+    var n = state.status ? state.status.phones || 0 : 0;
+    var label = n ? plural(n, 'phone') + ' connected' : 'Use LightningLAN on your phone';
+    $('phone-badge').hidden = n === 0;
+    $('phone-badge').textContent = n > 1 ? String(n) : '';
+    $('phone-open').title = label;
+    $('phone-open').setAttribute('aria-label', label);
+    $('phone-connected').textContent = n ? '✓ ' + plural(n, 'phone') + ' connected right now.' :
+      'No phone connected yet.';
+    $('phone-connected').classList.toggle('ok', n > 0);
+    if (n > phonesSeen && $('phone-dialog').open) toast('Phone connected!', 'ok');
+    phonesSeen = n;
   }
 
   // ----- the web UI session ---------------------------------------------------------------
@@ -386,7 +532,7 @@
     }
   }
 
-  // ----- Common Space ---------------------------------------------------------------------
+  // ----- ThunderCLOUD (every file on the network, merged) -----------------------------------
 
   async function refreshFiles() {
     var headers = {};
@@ -1032,6 +1178,17 @@
   function init() {
     applyTheme(storedTheme());
     $('theme-toggle').addEventListener('click', cycleTheme);
+    $('name-edit').addEventListener('click', startNameEdit);
+    $('name-form').addEventListener('submit', saveName);
+    $('name-dice').addEventListener('click', rollName);
+    $('name-cancel').addEventListener('click', endNameEdit);
+    $('name-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') endNameEdit();
+    });
+    $('phone-open').addEventListener('click', openPhone);
+    $('phone-close').addEventListener('click', closePhone);
+    $('phone-new-key').addEventListener('click', newPhoneKey);
+    $('phone-address').addEventListener('change', showPhoneLink);
     $('settings-open').addEventListener('click', openSettings);
     $('settings-cancel').addEventListener('click', closeSettings);
     $('settings-form').addEventListener('submit', saveSettings);

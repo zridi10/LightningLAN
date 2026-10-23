@@ -9,6 +9,44 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+  <!-- Scenery for the Synthwave, Bliss and Deep Sea themes (shown by style.css for that theme only). -->
+  <div class="scene scene-synthwave" aria-hidden="true">
+    <div class="sw-stars"></div>
+    <div class="sw-sun"></div>
+    <div class="sw-mountains"></div>
+    <div class="sw-floor"><div class="sw-grid"></div></div>
+  </div>
+  <div class="scene scene-bliss" aria-hidden="true">
+    <div class="bl-sun"></div>
+    <div class="bl-cloud c1"></div>
+    <div class="bl-cloud c2"></div>
+    <div class="bl-cloud c3"></div>
+    <div class="bl-cloud c4"></div>
+    <div class="bl-cloud c5"></div>
+    <div class="bl-hills"></div>
+  </div>
+  <div class="scene scene-deepsea" aria-hidden="true">
+    <div class="ds-rays"></div>
+    <div class="ds-jelly"></div>
+    <div class="ds-fish ds-clown"></div>
+    <div class="ds-fish ds-tang"></div>
+    <div class="ds-fish ds-clown ds-small"></div>
+    <div class="ds-bubble b1"></div>
+    <div class="ds-bubble b2"></div>
+    <div class="ds-bubble b3"></div>
+    <div class="ds-bubble b4"></div>
+    <div class="ds-bubble b5"></div>
+    <div class="ds-bubble b6"></div>
+    <div class="ds-bubble b7"></div>
+    <div class="ds-bubble b8"></div>
+    <div class="ds-floor"></div>
+    <div class="ds-weed w1"></div>
+    <div class="ds-weed w2"></div>
+    <div class="ds-weed w3"></div>
+    <div class="ds-coral k1"></div>
+    <div class="ds-coral k2"></div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
@@ -17,6 +55,22 @@
     <div class="me">
       <span class="me-label">You are</span>
       <strong id="self-name" class="me-name">…</strong>
+      <button id="name-edit" class="icon-btn small" type="button" title="Change your name" aria-label="Change your name">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+      </button>
+      <form id="name-form" class="name-form" hidden>
+        <input id="name-input" type="text" maxlength="64" autocomplete="off" spellcheck="false" aria-label="Your name">
+        <button id="name-dice" class="icon-btn small" type="button" title="Pick a random funny name"
+                aria-label="Pick a random funny name">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM12 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM7.5 15a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+        </button>
+        <button id="name-save" class="icon-btn small" type="submit" title="Save" aria-label="Save your name">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </button>
+        <button id="name-cancel" class="icon-btn small" type="button" title="Cancel" aria-label="Cancel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </form>
       <span id="lock" class="lock" hidden title="A passphrase is set: only peers with the same passphrase are visible">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1h1zm2 0h6V7a3 3 0 0 0-6 0v3z"/></svg>
         Passphrase
@@ -29,6 +83,11 @@
       <span id="peer-pill" class="pill pill-off" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="peer-count">0 peers online</span>
       </span>
+      <button id="phone-open" class="icon-btn phone-btn" type="button" title="Use LightningLAN on your phone"
+              aria-label="Use LightningLAN on your phone">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+        <span id="phone-badge" class="phone-badge" hidden></span>
+      </button>
       <button id="settings-open" class="icon-btn" type="button" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg>
       </button>
@@ -56,6 +115,8 @@
         <h2>Welcome to LightningLAN</h2>
         <p>Files in your shared folder are visible to everyone on this network who runs LightningLAN.
            Other computers show up here by themselves, and so do their files. Nothing to set up.</p>
+        <p>You're <strong id="welcome-name"></strong>, a name picked just for you. Click the pencil next to
+           it at the top to change it.</p>
         <p class="muted small">Your shared folder: <code id="welcome-share"></code></p>
         <div class="welcome-actions">
           <button id="welcome-settings" class="btn secondary" type="button">Change folders or name</button>
@@ -64,7 +125,7 @@
       </section>
 
       <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
-           aria-label="Add files to the Common Space: drop files here or press Enter to choose files">
+           aria-label="Add files to ThunderCLOUD: drop files here or press Enter to choose files">
         <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l5 5h-3v6h-4V8H7l5-5zM5 16h2v3h10v-3h2v5H5v-5z"/></svg>
         <div>
           <div class="drop-title">Drop files or folders here to share them</div>
@@ -75,7 +136,11 @@
       <ul id="uploads" class="uploads" aria-label="Uploads"></ul>
 
       <div class="section-head">
-        <h2>Common Space</h2>
+        <h2 class="cloud-title">
+          <svg class="cloud-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path class="cloud" d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.99 5.99 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+            <path class="bolt" d="M13.5 8 9 14h3l-1.5 5L15 13h-3l1.5-5z"/>
+          </svg>ThunderCLOUD</h2>
         <span id="file-summary" class="muted"></span>
         <input id="filter" class="filter" type="search" placeholder="Filter by name…" aria-label="Filter files by name">
       </div>
@@ -103,7 +168,7 @@
           <button id="clear-downloads" class="text-btn" type="button" hidden>Clear finished</button>
         </div>
         <ul id="downloads" class="downloads" aria-live="polite"></ul>
-        <p id="downloads-empty" class="empty small">Nothing downloaded yet. Pick a file from the Common Space.</p>
+        <p id="downloads-empty" class="empty small">Nothing downloaded yet. Pick a file from ThunderCLOUD.</p>
         <div class="folder-line">
           <span class="muted small">Saved to</span>
           <code id="downloads-dir" class="path"></code>
@@ -184,7 +249,40 @@
     </form>
   </dialog>
 
+  <dialog id="phone-dialog" class="dialog" aria-labelledby="phone-title">
+    <div class="dialog-body">
+      <h2 id="phone-title">Use LightningLAN on your phone</h2>
+      <p class="muted small">Android or iPhone, in the phone's web browser. Nothing to install.</p>
+      <div class="phone-setup">
+        <div id="qr-box" class="qr-box">
+          <svg id="phone-qr" class="qr" viewBox="0 0 1 1" role="img" aria-label="QR code of the phone link"></svg>
+        </div>
+        <ol class="phone-steps">
+          <li>Connect the phone to the same Wi-Fi as this computer.</li>
+          <li>Point the phone's camera at the code and tap the link that appears.</li>
+          <li>The phone can now download anything in ThunderCLOUD and send photos and files here.</li>
+        </ol>
+      </div>
+      <p id="phone-no-network" class="form-error" hidden>This computer isn't connected to a network, so a phone
+         can't reach it.</p>
+      <div id="phone-address-row" class="field" hidden>
+        <label class="field-label" for="phone-address">Network address</label>
+        <select id="phone-address" class="select"></select>
+        <span class="field-help">This computer has more than one. If the phone can't connect, try another.</span>
+      </div>
+      <p class="small">No camera? Type this into the phone's browser: <code id="phone-url" class="phone-url"></code></p>
+      <p id="phone-connected" class="phone-connected small"></p>
+      <p class="muted small">Anyone who scans this code can do the same, so only show it to people you trust.
+         Not connecting? Check that the firewall allows LightningLAN on private networks, and that the phone
+         isn't on a guest Wi-Fi.</p>
+      <div class="dialog-actions">
+        <button id="phone-new-key" class="text-btn danger" type="button">Disconnect phones</button>
+        <button id="phone-close" class="btn" type="button">Done</button>
+      </div>
+    </div>
+  </dialog>
+
   <div id="toasts" class="toasts" aria-live="assertive"></div>
-  <div id="drag-overlay" class="drag-overlay" hidden><div>Drop to add to the Common Space</div></div>
+  <div id="drag-overlay" class="drag-overlay" hidden><div>Drop to add to ThunderCLOUD</div></div>
 </body>
 </html>

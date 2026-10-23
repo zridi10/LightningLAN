@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
+import secrets
 import time
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from .desktop import folder_picker_available
 from .discovery import Discovery
 from .indexer import Indexer
 from .logs import log_dir
+from .netutil import lan_addresses
 from .peers import PeerTable
 from .pieces import PieceInfo
 from .serving import UploadLimiter
@@ -68,6 +71,8 @@ class Node:
         self._paused_by_stop: list[str] = []
         self._ui_sessions = 0
         self._ui_timer: asyncio.Task | None = None
+        self.phones = 0  # phone pages open right now
+        self._phone_key_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
 
     @property
@@ -182,6 +187,45 @@ class Node:
         if self._ui_sessions == 0:
             await self.go_offline(CLOSED)
 
+    # ----- phones (the phone page, opened from the QR code in the web UI) --------------------
+
+    def phone_opened(self) -> None:
+        """A phone page connected. It keeps this peer online like an open web UI tab does."""
+        self.phones += 1
+        log.info("a phone connected (%d connected)", self.phones)
+        self.ui_opened()
+
+    def phone_closed(self) -> None:
+        self.phones -= 1
+        log.info("a phone disconnected (%d connected)", self.phones)
+        self.ui_closed()
+
+    def phone_key_matches(self, key: str | None) -> bool:
+        stored = self.settings.phone_key
+        if not stored or not key:
+            return False
+        return hmac.compare_digest(stored.encode("utf-8"), key.encode("utf-8"))
+
+    async def ensure_phone_key(self, new: bool = False) -> str:
+        """The secret in the phone link: made the first time it is asked for and kept in the config
+        file, so phones stay connected. new=True replaces it, which disconnects every phone."""
+        async with self._phone_key_lock:
+            if self.settings.phone_key and not new:
+                return self.settings.phone_key
+            key = secrets.token_urlsafe(18)
+            try:
+                await asyncio.to_thread(update_config_file, self.settings.config_path, {"phone_key": key})
+            except ConfigError as exc:
+                raise SettingsError(str(exc)) from exc
+            self.settings.phone_key = key
+            log.info("new phone key%s", ": phones connected before must scan the QR code again" if new else "")
+            return key
+
+    async def phone_addresses(self) -> list[str]:
+        """This computer's addresses that a phone on the same network can reach."""
+        found = await asyncio.to_thread(lan_addresses, self.settings.interfaces)
+        return [a for a in found if not a.startswith("127.")]
+
     def _spawn(self, coro) -> asyncio.Task:
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)
@@ -216,7 +260,7 @@ class Node:
         return self.indexer.pieces_info(file_id) or self.downloads.piece_info_for(file_id)
 
     def common_payload(self) -> tuple[bytes, str]:
-        """The merged Common Space as JSON plus an ETag, recomputed only when something changed."""
+        """The merged ThunderCLOUD as JSON plus an ETag, recomputed only when something changed."""
         key = (self.indexer.snapshot.version, self.peers.version)
         cached = self._common_cache
         if cached is not None and cached[0] == key:
@@ -254,6 +298,7 @@ class Node:
             "online": self.online,
             "offline_reason": self.offline_reason,
             "first_run": self.settings.first_run,
+            "phones": self.phones,
         }
 
     def peers_payload(self) -> dict:

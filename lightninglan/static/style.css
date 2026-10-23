@@ -114,6 +114,13 @@ button { font: inherit; color: inherit; }
             display: inline-grid; place-items: center; cursor: pointer; }
 .icon-btn:hover { background: var(--surface-2); }
 .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+.icon-btn.small { width: 26px; height: 26px; flex: none; border-color: transparent; background: transparent; }
+.icon-btn.small:hover { background: var(--surface-2); border-color: var(--border); }
+.icon-btn.small svg { width: 15px; height: 15px; }
+.name-form { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.name-form input { width: 24ch; max-width: 46vw; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--border);
+                   background: var(--surface); color: var(--text); font: inherit; font-weight: 650; }
+.name-form input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .banner { background: var(--danger-soft); color: var(--danger); padding: 10px 24px; font-weight: 550;
           border-bottom: 1px solid var(--border); }
@@ -165,9 +172,13 @@ button { font: inherit; color: inherit; }
 .drag-overlay div { background: var(--surface); padding: 14px 22px; border-radius: 12px; font-weight: 650;
                     box-shadow: var(--shadow); font-size: 16px; }
 
-/* ----- Common Space table ----------------------------------------------------------------- */
+/* ----- ThunderCLOUD table ----------------------------------------------------------------- */
 
 .section-head { display: flex; align-items: center; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
+.cloud-title { display: inline-flex; align-items: center; gap: 7px; font-size: 16px; }
+.cloud-icon { width: 22px; height: 22px; flex: none; }
+.cloud-icon .cloud { fill: var(--muted); }
+.cloud-icon .bolt { fill: var(--bolt); }
 .section-head .filter { margin-left: auto; }
 .filter { width: 220px; max-width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
           background: var(--surface); color: var(--text); font: inherit; }
@@ -319,7 +330,273 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .toast.error { border-left-color: var(--danger); }
 .toast.ok { border-left-color: var(--ok); }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ----- phones: the QR code dialog on the computer, and the phone page ------------------------- */
+
+.phone-btn { position: relative; }
+.phone-badge { position: absolute; top: -4px; right: -4px; min-width: 12px; height: 12px; padding: 0 3px;
+               border-radius: 999px; background: var(--ok); color: #fff; font-size: 9px; font-weight: 700;
+               line-height: 12px; text-align: center; box-shadow: 0 0 0 2px var(--surface); }
+.dialog-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+.dialog-body p { margin: 0; }
+.dialog-actions .text-btn.danger { margin: 0 auto 0 0; padding-left: 0; }
+.phone-setup { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.qr-box { flex: none; width: 200px; border-radius: 10px; overflow: hidden; background: #fff;
+          box-shadow: 0 0 0 1px var(--border); }
+.qr { display: block; width: 100%; height: auto; }
+.phone-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; flex: 1;
+               min-width: 220px; }
+.phone-url { word-break: break-all; user-select: all; }
+.phone-connected { font-weight: 600; color: var(--muted); }
+.phone-connected.ok { color: var(--ok); }
+.select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
+          color: var(--text); font: inherit; }
+.select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.phone .topbar { padding: 10px 14px; }
+.phone-main { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 14px 14px 48px; }
+.phone-ui { display: flex; flex-direction: column; gap: 12px; }
+.phone-via { margin: 0; color: var(--muted); }
+.phone-send { width: 100%; text-align: left; font: inherit; color: var(--text); }
+.phone-send .drop-title, .phone-send .drop-sub { display: block; }
+.phone-tools { display: flex; gap: 8px; }
+.phone-tools .filter { flex: 1; width: auto; min-width: 0; }
+.phone-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pf { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.pf-ext { flex: none; width: 42px; height: 42px; border-radius: 9px; display: grid; place-items: center; color: #fff;
+          font-size: 11px; font-weight: 800; letter-spacing: 0.02em; }
+.pf-body { flex: 1; min-width: 0; }
+.pf-name { font-weight: 600; word-break: break-word; }
+.pf-name .folder { color: var(--muted); font-weight: 400; }
+.pf-meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.pf-get { flex: none; padding: 9px 16px; font-size: 14px; text-decoration: none; }
+.pf-get.disabled { opacity: 0.5; }
+.pair-card { text-align: center; padding: 28px 20px; }
+.pair-card h2 { font-size: 18px; margin: 8px 0; }
+.pair-card p { margin: 0 0 8px; }
+.pair-icon { width: 54px; height: 54px; fill: var(--accent); }
+
+/* ----- colourful themes: Synthwave, Bliss and Deep Sea -------------------------------------- */
+/* Each one sets every colour token (so it wins over the dark-mode block at the top) and shows
+   its own animated scene behind the page; cards turn to frosted glass so the scene shows through. */
+
+:root[data-theme="synthwave"] {
+  --bg: #12052a;
+  --surface: rgba(34, 14, 66, 0.72);
+  --surface-2: rgba(66, 26, 112, 0.62);
+  --surface-solid: #2a1150;
+  --border: rgba(255, 79, 196, 0.38);
+  --text: #fdf2ff;
+  --muted: #cfaaf0;
+  --accent: #ff3fbf;
+  --accent-hover: #ff73d1;
+  --accent-soft: rgba(255, 63, 191, 0.2);
+  --accent-text: #170530;
+  --bolt: #ffe45c;
+  --ok: #36f9c6;
+  --ok-soft: rgba(54, 249, 198, 0.16);
+  --warn: #ffb86c;
+  --danger: #ff5c7a;
+  --danger-soft: rgba(255, 92, 122, 0.2);
+  --shadow: 0 0 0 1px rgba(255, 63, 191, 0.12), 0 10px 30px rgba(5, 0, 20, 0.55);
+  color-scheme: dark;
+}
+
+:root[data-theme="bliss"] {
+  --bg: #9fd4ff;
+  --surface: rgba(255, 255, 255, 0.84);
+  --surface-2: rgba(232, 243, 255, 0.86);
+  --surface-solid: #eaf4ff;
+  --border: rgba(31, 92, 170, 0.2);
+  --text: #12324f;
+  --muted: #47657f;
+  --accent: #2258d6;
+  --accent-hover: #1a48b8;
+  --accent-soft: #e2ecff;
+  --accent-text: #ffffff;
+  --bolt: #ffb300;
+  --ok: #2f9a3c;
+  --ok-soft: #e3f6e1;
+  --warn: #a86400;
+  --danger: #d33a2c;
+  --danger-soft: #fde7e4;
+  --shadow: 0 2px 10px rgba(20, 70, 140, 0.18);
+  --radius: 14px;
+  color-scheme: light;
+}
+
+:root[data-theme="deepsea"] {
+  --bg: #032b43;
+  --surface: rgba(3, 40, 64, 0.7);
+  --surface-2: rgba(8, 72, 106, 0.62);
+  --surface-solid: #064463;
+  --border: rgba(110, 230, 255, 0.26);
+  --text: #e8fbff;
+  --muted: #a3d6e6;
+  --accent: #ffb347;
+  --accent-hover: #ffc773;
+  --accent-soft: rgba(255, 179, 71, 0.18);
+  --accent-text: #03263b;
+  --bolt: #ffe066;
+  --ok: #5ef0b4;
+  --ok-soft: rgba(94, 240, 180, 0.16);
+  --warn: #ffd166;
+  --danger: #ff7b7b;
+  --danger-soft: rgba(255, 107, 107, 0.2);
+  --shadow: 0 10px 30px rgba(0, 14, 28, 0.45);
+  color-scheme: dark;
+}
+
+.scene { display: none; position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.scene > div { position: absolute; }
+:root[data-theme="synthwave"] .scene-synthwave,
+:root[data-theme="bliss"] .scene-bliss,
+:root[data-theme="deepsea"] .scene-deepsea { display: block; }
+.layout, .banner { position: relative; z-index: 1; }
+
+:root:is([data-theme="synthwave"], [data-theme="bliss"], [data-theme="deepsea"])
+  :is(.topbar, .banner, .card, .table-wrap, .drop-zone, .uploads li, .toast, .dialog, .pf) {
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  backdrop-filter: blur(10px) saturate(1.3);
+}
+:root:is([data-theme="synthwave"], [data-theme="bliss"], [data-theme="deepsea"]) .files th {
+  background: var(--surface-solid);
+}
+
+/* Synthwave: an 80s outrun sunset in the style of the Synthwave '84 look: a striped neon sun,
+   mountains and an endless glowing grid rolling towards you under the stars. */
+.scene-synthwave { background: linear-gradient(#090118 0%, #1d0b40 32%, #4a1470 52%, #c0266f 63.5%, #12052a 64%); }
+.sw-stars { inset: 0 0 42% 0; animation: sw-twinkle 2.6s ease-in-out infinite alternate;
+  background-image:
+    radial-gradient(2px 2px at 7% 14%, #fff, transparent), radial-gradient(2px 2px at 18% 32%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 27% 8%, #fff, transparent), radial-gradient(2px 2px at 39% 24%, #ffd6f5, transparent),
+    radial-gradient(1.5px 1.5px at 52% 11%, #fff, transparent), radial-gradient(2px 2px at 61% 36%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 73% 18%, #c9fff4, transparent), radial-gradient(2px 2px at 84% 7%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 92% 29%, #fff, transparent), radial-gradient(2px 2px at 46% 42%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 13% 46%, #fff, transparent), radial-gradient(2px 2px at 88% 48%, #ffd6f5, transparent); }
+.sw-stars::after { content: ""; position: absolute; inset: 0; animation: sw-twinkle 3.4s ease-in-out infinite alternate-reverse;
+  background-image:
+    radial-gradient(1.5px 1.5px at 4% 30%, #fff, transparent), radial-gradient(2px 2px at 22% 20%, #c9fff4, transparent),
+    radial-gradient(1.5px 1.5px at 33% 40%, #fff, transparent), radial-gradient(2px 2px at 44% 6%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 57% 27%, #fff, transparent), radial-gradient(2px 2px at 68% 9%, #ffd6f5, transparent),
+    radial-gradient(1.5px 1.5px at 79% 33%, #fff, transparent), radial-gradient(2px 2px at 95% 15%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 65% 45%, #fff, transparent), radial-gradient(2px 2px at 30% 52%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 10% 4%, #fff, transparent), radial-gradient(2px 2px at 76% 52%, #c9fff4, transparent); }
+@keyframes sw-twinkle { from { opacity: 0.35; } to { opacity: 1; } }
+.sw-sun { left: 50%; bottom: 31%; width: min(40vw, 400px); aspect-ratio: 1; transform: translateX(-50%);
+          background: url(themes/synthwave-sun.svg) center / contain no-repeat;
+          filter: drop-shadow(0 0 28px rgba(255, 64, 160, 0.7)); animation: sw-glow 3.5s ease-in-out infinite alternate; }
+@keyframes sw-glow { to { filter: drop-shadow(0 0 48px rgba(255, 140, 60, 0.85)); } }
+.sw-mountains { left: 0; right: 0; bottom: 36%; height: 13vh;
+                background: url(themes/synthwave-mountains.svg) bottom / 100% 100% no-repeat; }
+.sw-floor { left: 0; right: 0; top: 64%; bottom: 0; overflow: hidden; perspective: 300px; perspective-origin: 50% 0;
+            background: linear-gradient(#2d0b52, #0b0220); }
+.sw-floor::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 40%;
+                   background: linear-gradient(rgba(192, 38, 111, 0.6), transparent); }
+.sw-grid { position: absolute; left: -150%; right: -150%; top: -70px; height: 1200px; transform-origin: 50% 70px;
+           background-image: linear-gradient(rgba(255, 63, 191, 0.85) 2px, transparent 2px),
+                             linear-gradient(90deg, rgba(54, 249, 198, 0.55) 2px, transparent 2px);
+           background-size: 70px 70px; animation: sw-roll 1.1s linear infinite; }
+@keyframes sw-roll { from { transform: rotateX(68deg) translateY(0); } to { transform: rotateX(68deg) translateY(70px); } }
+:root[data-theme="synthwave"] .brand-name {
+  background: linear-gradient(90deg, #ff3fbf, #ffe45c 55%, #36f9c6); -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+:root[data-theme="synthwave"] .logo { filter: drop-shadow(0 0 6px rgba(255, 228, 92, 0.85)); }
+:root[data-theme="synthwave"] h2 { color: #7ffcff; text-shadow: 0 0 10px rgba(54, 249, 198, 0.55); letter-spacing: 0.04em; }
+:root[data-theme="synthwave"] .btn:not(.secondary) { box-shadow: 0 0 14px rgba(255, 63, 191, 0.55); }
+
+/* Bliss: a sunny day over rolling green hills, after the classic Windows XP wallpaper, with a
+   blue Luna-style title bar, green start-button buttons and clouds drifting past. */
+.scene-bliss { background: linear-gradient(#1c64d8 0%, #4d9cf0 32%, #98cffb 62%, #d9f1ff 80%); }
+.bl-sun { top: 5vh; right: 7vw; width: clamp(110px, 15vw, 190px); aspect-ratio: 1;
+          background: url(themes/bliss-sun.svg) center / contain no-repeat; animation: bl-spin 80s linear infinite; }
+@keyframes bl-spin { to { transform: rotate(360deg); } }
+.bl-cloud { left: 0; width: 220px; aspect-ratio: 2; background: url(themes/bliss-cloud.svg) center / contain no-repeat;
+            animation: bl-drift 100s linear infinite; }
+.bl-cloud.c1 { top: 6vh; animation-duration: 95s; animation-delay: -12s; }
+.bl-cloud.c2 { top: 21vh; width: 300px; animation-duration: 130s; animation-delay: -70s; }
+.bl-cloud.c3 { top: 13vh; width: 150px; animation-duration: 75s; animation-delay: -40s; opacity: 0.85; }
+.bl-cloud.c4 { top: 33vh; width: 260px; animation-duration: 115s; animation-delay: -95s; }
+.bl-cloud.c5 { top: 2vh; width: 180px; animation-duration: 85s; animation-delay: -58s; opacity: 0.9; }
+@keyframes bl-drift { from { transform: translateX(-340px); } to { transform: translateX(calc(100vw + 40px)); } }
+.bl-hills { left: 0; right: 0; bottom: 0; height: 44vh; background: url(themes/bliss-hills.svg) bottom / 100% 100% no-repeat; }
+:root[data-theme="bliss"] body { font-family: Tahoma, Verdana, "Segoe UI", system-ui, sans-serif; }
+:root[data-theme="bliss"] .topbar { background: linear-gradient(#3c8cff, #2264e3 38%, #1a55cf 62%, #2a6cf0); color: #fff;
+                                     border-bottom-color: #133f9c; }
+:root[data-theme="bliss"] .top-right { color: var(--text); }
+:root[data-theme="bliss"] .me-label { color: rgba(255, 255, 255, 0.85); }
+:root[data-theme="bliss"] .lock { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
+:root[data-theme="bliss"] .brand-name { text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+:root[data-theme="bliss"] .me .icon-btn.small:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.4); }
+:root[data-theme="bliss"] h2 { color: #1d4fb8; }
+:root[data-theme="bliss"] .btn:not(.secondary) { background: linear-gradient(#5cc24a, #3a9a2b); border-color: #2c7b1f;
+                                                  color: #fff; border-radius: 9px; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25); }
+:root[data-theme="bliss"] .btn:not(.secondary):hover { background: linear-gradient(#6fd45b, #43a832); }
+
+/* Deep Sea: an aquarium screensaver under the waves: light rays from the surface, rising
+   bubbles, a jellyfish, and fish swimming past swaying seaweed and coral. */
+.scene-deepsea { background: linear-gradient(#0b88b3 0%, #06618c 28%, #043e62 62%, #02223a 100%); }
+.ds-rays { left: -10%; right: -10%; top: 0; height: 75%;
+           background: repeating-linear-gradient(105deg, transparent 0 70px, rgba(200, 245, 255, 0.09) 70px 115px,
+                                                 transparent 115px 200px);
+           -webkit-mask-image: linear-gradient(#000, transparent); mask-image: linear-gradient(#000, transparent);
+           animation: ds-shimmer 11s ease-in-out infinite alternate; }
+@keyframes ds-shimmer { from { transform: translateX(-40px); opacity: 0.6; } to { transform: translateX(40px); opacity: 1; } }
+.ds-jelly { right: 11vw; top: 22vh; width: 64px; aspect-ratio: 2 / 3; opacity: 0.9;
+            background: url(themes/deepsea-jelly.svg) center / contain no-repeat; animation: ds-bob 7s ease-in-out infinite; }
+@keyframes ds-bob { 0%, 100% { transform: translateY(0) scale(1, 1); } 50% { transform: translateY(-46px) scale(1.05, 0.95); } }
+.ds-fish { left: 0; background-position: center; background-size: contain; background-repeat: no-repeat; }
+.ds-clown { top: 30vh; width: 104px; aspect-ratio: 12 / 7; background-image: url(themes/deepsea-clownfish.svg);
+            animation: ds-swim-right 36s linear infinite; }
+.ds-clown.ds-small { top: 16vh; width: 64px; animation-duration: 28s; animation-delay: -15s; }
+.ds-tang { top: 56vh; width: 118px; aspect-ratio: 3 / 2; background-image: url(themes/deepsea-tang.svg);
+           animation: ds-swim-left 44s linear infinite; animation-delay: -22s; }
+@keyframes ds-swim-right {
+  0% { transform: translate(-160px, 0); }
+  25% { transform: translate(25vw, -14px); }
+  50% { transform: translate(50vw, 6px); }
+  75% { transform: translate(75vw, -10px); }
+  100% { transform: translate(calc(100vw + 40px), 0); }
+}
+@keyframes ds-swim-left {
+  0% { transform: translate(calc(100vw + 40px), 0) scaleX(-1); }
+  33% { transform: translate(66vw, 12px) scaleX(-1); }
+  66% { transform: translate(33vw, -10px) scaleX(-1); }
+  100% { transform: translate(-180px, 0) scaleX(-1); }
+}
+.ds-bubble { bottom: -24px; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.55);
+             background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.95) 0 16%, rgba(255, 255, 255, 0.14) 42%,
+                                         rgba(255, 255, 255, 0.04) 72%);
+             animation: ds-rise 12s ease-in infinite; }
+.ds-bubble.b1 { left: 6%; }
+.ds-bubble.b2 { left: 13%; width: 7px; height: 7px; animation-duration: 9s; animation-delay: -4s; }
+.ds-bubble.b3 { left: 22%; width: 16px; height: 16px; animation-duration: 15s; animation-delay: -9s; }
+.ds-bubble.b4 { left: 37%; width: 9px; height: 9px; animation-duration: 10s; animation-delay: -2s; }
+.ds-bubble.b5 { left: 58%; animation-duration: 13s; animation-delay: -7s; }
+.ds-bubble.b6 { left: 71%; width: 8px; height: 8px; animation-duration: 8s; animation-delay: -5s; }
+.ds-bubble.b7 { left: 84%; width: 14px; height: 14px; animation-duration: 14s; animation-delay: -11s; }
+.ds-bubble.b8 { left: 93%; width: 10px; height: 10px; animation-duration: 11s; animation-delay: -6s; }
+@keyframes ds-rise {
+  0% { transform: translate(0, 0); opacity: 0; }
+  10% { opacity: 1; }
+  50% { transform: translate(14px, -55vh); }
+  100% { transform: translate(-10px, -112vh); opacity: 0.5; }
+}
+.ds-floor { left: 0; right: 0; bottom: 0; height: 15vh; background: url(themes/deepsea-floor.svg) bottom / 100% 100% no-repeat; }
+.ds-weed { bottom: 7vh; width: 56px; height: 26vh; transform-origin: 50% 100%;
+           background: url(themes/deepsea-seaweed.svg) bottom / contain no-repeat; animation: ds-sway 4.5s ease-in-out infinite alternate; }
+.ds-weed.w1 { left: 3vw; }
+.ds-weed.w2 { left: 7vw; height: 18vh; animation-delay: -2s; }
+.ds-weed.w3 { right: 5vw; height: 30vh; animation-delay: -1s; }
+@keyframes ds-sway { from { transform: rotate(-6deg); } to { transform: rotate(6deg); } }
+.ds-coral { bottom: 5vh; width: 104px; aspect-ratio: 1; background: url(themes/deepsea-coral.svg) bottom / contain no-repeat; }
+.ds-coral.k1 { left: 12vw; }
+.ds-coral.k2 { right: 13vw; width: 78px; filter: hue-rotate(45deg); }
+:root[data-theme="deepsea"] h2 { color: #7fe8ff; }
+
 @media (prefers-reduced-motion: reduce) {
-  .toast, .nyan-orbit { animation: none; }
+  .toast, .nyan-orbit, .scene *, .scene *::after { animation: none !important; }
   * { transition: none !important; }
 }

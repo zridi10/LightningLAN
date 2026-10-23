@@ -4,6 +4,11 @@
   /api/swarm/{id}, /api/piece/{id}/{n}) are reachable from the LAN. When a
   passphrase is set they require a valid peer token, and responses carry a proof header.
   While this peer is stopped (offline) they answer 503, and transfers in progress are cut off.
+* The phone page (/phone) and the page's own files (/static/) are open to the LAN; opening this
+  computer's address on a phone leads to the phone page. The phone API (/phone/api/...) requires
+  the phone cookie, which holds the key from the QR code in the web UI. Phone requests that
+  change something must carry X-LightningLAN-Client and, if the browser sent an Origin, the
+  page's own (blocking cross-site request forgery).
 * Everything else (the web UI, uploads, starting downloads) is for the local user only. It
   requires a loopback client address and a localhost Host header (blocking DNS rebinding).
   State-changing requests must also carry X-LightningLAN-Client and, if the browser sent an
@@ -17,7 +22,10 @@ import json
 from typing import Callable
 from urllib.parse import urlsplit
 
+from starlette.requests import cookie_parser
+
 from .auth import PROOF_HEADER, TOKEN_HEADER, AuthError, Authenticator
+from .phone import COOKIE as PHONE_COOKIE
 from .serving import UploadsCut
 
 CLIENT_HEADER = "x-lightninglan-client"
@@ -30,6 +38,10 @@ _LAN_PREFIXES = ("/api/download/", "/api/pieces/", "/api/swarm/", "/api/piece/")
 
 def is_lan_route(path: str) -> bool:
     return path == "/api/files" or path.startswith(_LAN_PREFIXES)
+
+
+def is_phone_route(path: str) -> bool:
+    return path == "/phone" or path.startswith("/phone/")
 
 
 def is_loopback(host: str | None) -> bool:
@@ -69,11 +81,24 @@ def is_local_origin(origin: str) -> bool:
     return host in _LOCAL_HOSTNAMES or is_loopback(host)
 
 
+def is_same_origin(origin: str, host_header: str | None) -> bool:
+    """True if the Origin a browser sent is the site it is talking to (http://<Host header>)."""
+    if not host_header:
+        return False
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    return parts.scheme == "http" and parts.netloc.lower() == host_header.strip().lower()
+
+
 class AccessControlMiddleware:
-    def __init__(self, app, auth: Authenticator, online: Callable[[], bool] = lambda: True):
+    def __init__(self, app, auth: Authenticator, online: Callable[[], bool] = lambda: True,
+                 phone_key_ok: Callable[[str | None], bool] = lambda key: False):
         self.app = app
         self.auth = auth
         self.online = online
+        self.phone_key_ok = phone_key_ok
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -104,8 +129,18 @@ class AccessControlMiddleware:
                 pass  # this peer went offline mid-transfer; ending early makes the server drop the connection
             return
 
+        if path.startswith("/static/") and method in ("GET", "HEAD"):
+            await self.app(scope, receive, send)  # the pages' own scripts, styles and pictures
+            return
+        if is_phone_route(path):
+            await self._phone(scope, receive, send, path, method, headers)
+            return
+
         client = scope.get("client")
         if not client or not is_loopback(client[0]):
+            if path == "/" and method in ("GET", "HEAD"):
+                await _redirect(send, "/phone")  # someone typed this computer's address on their phone
+                return
             await _reject(send, 403, "local_only", "This page is only available on the computer running LightningLAN.")
             return
         if not is_local_host_header(headers.get("host")):
@@ -121,6 +156,29 @@ class AccessControlMiddleware:
                 return
         await self.app(scope, receive, send)
 
+    async def _phone(self, scope, receive, send, path: str, method: str, headers: dict[str, str]) -> None:
+        if method not in ("GET", "HEAD", "POST"):
+            await _reject(send, 405, "method_not_allowed", "Method not allowed.")
+            return
+        if path != "/phone":  # the page itself is open: it tells an unpaired phone how to connect
+            key = cookie_parser(headers.get("cookie", "")).get(PHONE_COOKIE)
+            if not self.phone_key_ok(key):
+                await _reject(send, 401, "not_paired",
+                              "Scan the QR code in LightningLAN on the computer to connect this phone.")
+                return
+        if method == "POST":
+            origin = headers.get("origin")
+            if origin is not None and not is_same_origin(origin, headers.get("host")):
+                await _reject(send, 403, "bad_origin", "Cross-site requests are not allowed.")
+                return
+            if CLIENT_HEADER not in headers:
+                await _reject(send, 403, "missing_client_header", "Missing X-LightningLAN-Client header.")
+                return
+        try:
+            await self.app(scope, receive, send)
+        except UploadsCut:
+            pass  # a download to the phone ended early: dropping the connection tells its browser
+
 
 def _with_proof(send, proof: str):
     async def wrapped(message):
@@ -132,6 +190,17 @@ def _with_proof(send, proof: str):
         await send(message)
 
     return wrapped
+
+
+async def _redirect(send, location: str) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 307,
+            "headers": [(b"location", location.encode("latin-1")), (b"content-length", b"0")],
+        }
+    )
+    await send({"type": "http.response.body", "body": b""})
 
 
 async def _reject(send, status: int, error: str, detail: str, reason: str | None = None) -> None:

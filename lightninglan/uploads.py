@@ -1,4 +1,4 @@
-"""Adding files to the Common Space: the local UI streams a file into the shared folder."""
+"""Adding files to ThunderCLOUD: the local UI streams a file into the shared folder."""
 
 from __future__ import annotations
 

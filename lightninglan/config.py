@@ -12,11 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .names import random_name
+
 DEFAULT_PORT = 8765
 DEFAULT_REFRESH_INTERVAL = 3.0
 MAX_NAME_LENGTH = 64
 
 _PEER_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+PHONE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 
 class ConfigError(Exception):
@@ -55,6 +58,7 @@ class Settings:
     downloads_dir: Path
     port: int = DEFAULT_PORT
     passphrase: str | None = None
+    phone_key: str | None = None  # the secret in the phone link (QR code); None until a phone is first set up
     config_path: Path | None = None
     # Runtime-only options (never written to the config file).
     interfaces: list[str] | None = None
@@ -146,7 +150,13 @@ def load_settings(
     if not isinstance(peer_id, str) or not _PEER_ID_RE.match(peer_id):
         peer_id = uuid.uuid4().hex
 
-    resolved_name = clean_display_name(name if name is not None else str(data.get("name") or ""))
+    stored_name = data.get("name") if isinstance(data.get("name"), str) else ""
+    if name is not None:
+        resolved_name = clean_display_name(name)
+    elif stored_name.strip():
+        resolved_name = clean_display_name(stored_name)
+    else:
+        resolved_name = random_name()  # never picked a name: a funny one, remembered from now on
     share_dir = Path(share if share is not None else data.get("share_dir") or default_share_dir())
     downloads_dir = Path(
         downloads if downloads is not None else data.get("downloads_dir") or default_downloads_dir()
@@ -159,6 +169,9 @@ def load_settings(
         stored = data.get("passphrase")
         passphrase = stored if isinstance(stored, str) else None
     passphrase = passphrase or None
+    phone_key = data.get("phone_key")
+    if not isinstance(phone_key, str) or not PHONE_KEY_RE.match(phone_key):
+        phone_key = None
 
     share_dir = prepare_folder(share_dir, "shared")
     downloads_dir = prepare_folder(downloads_dir, "downloads")
@@ -170,6 +183,7 @@ def load_settings(
         downloads_dir=downloads_dir,
         port=resolved_port,
         passphrase=passphrase,
+        phone_key=phone_key,
         config_path=path,
         first_run=first_run,
     )
@@ -182,7 +196,7 @@ def load_settings(
             downloads_dir=str(downloads_dir),
             port=resolved_port,
         )
-        if name is not None:
+        if name is not None or not stored_name.strip():
             updated["name"] = resolved_name
         if updated != data:
             try:

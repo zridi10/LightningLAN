@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 70">
+  <defs>
+    <clipPath id="body">
+      <ellipse cx="62" cy="36" rx="42" ry="23"/>
+    </clipPath>
+  </defs>
+  <path d="M26 36 L5 16 Q0 36 5 56 Z" fill="#ff7a1a" stroke="#1b1b1b" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M48 16 Q60 1 78 13 Z" fill="#ff7a1a" stroke="#1b1b1b" stroke-width="2.5" stroke-linejoin="round"/>
+  <ellipse cx="62" cy="36" rx="42" ry="23" fill="#ff7a1a"/>
+  <g clip-path="url(#body)" fill="#ffffff" stroke="#1b1b1b" stroke-width="2.5">
+    <rect x="30" y="0" width="9" height="70"/>
+    <rect x="56" y="0" width="11" height="70"/>
+    <rect x="83" y="0" width="8" height="70"/>
+  </g>
+  <ellipse cx="62" cy="36" rx="42" ry="23" fill="none" stroke="#1b1b1b" stroke-width="2.5"/>
+  <path d="M60 48 Q66 63 74 50 Z" fill="#ff7a1a" stroke="#1b1b1b" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="97" cy="30" r="5" fill="#ffffff"/>
+  <circle cx="98" cy="30" r="3" fill="#1b1b1b"/>
+  <path d="M104 40 Q100 44 95 42" fill="none" stroke="#1b1b1b" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

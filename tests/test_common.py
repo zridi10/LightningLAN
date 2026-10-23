@@ -1,4 +1,4 @@
-"""Unit tests for merging indexes into the Common Space."""
+"""Unit tests for merging indexes into ThunderCLOUD."""
 
 import hashlib
 

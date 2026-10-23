@@ -34,9 +34,11 @@ once.
      and mark it as allowed. Apps packaged the way LightningLAN is are sometimes flagged by mistake.
 4. When **Windows Defender Firewall** asks about LightningLAN, make sure **Private networks** is
    ticked and click **Allow access**. If you skip this, other computers can't see yours.
-5. Your web browser opens the LightningLAN page. A lightning-bolt icon also appears in the
+5. LightningLAN opens in a window of its own. A lightning-bolt icon also appears in the
    notification area at the bottom right of the screen. If you don't see it, click the small
-   **^** arrow next to the clock.
+   **^** arrow next to the clock. Closing the window leaves LightningLAN in the notification
+   area; click the icon to open the window again. (On a PC without Microsoft's WebView2, which
+   Windows 11 includes, it opens in your web browser instead.)
 
 ### Linux
 
@@ -62,9 +64,12 @@ once.
 ## 3. Using LightningLAN
 
 - **First start**: LightningLAN sets everything up for you. It creates a **LightningLAN** folder in
-  your home folder with two folders inside, **Shared** and **Downloads**, and uses your
-  computer's name as your name. A welcome note on the page shows you where your shared folder
-  is.
+  your home folder with two folders inside, **Shared** and **Downloads**, and gives you a random
+  funny name. A welcome note on the page shows you where your shared folder is.
+- **Your name**: click the pencil next to your name at the top of the page, type a new one and
+  press Enter. The dice button suggests another funny name.
+- **Themes**: click the half-circle button at the top right to switch between automatic, light
+  and dark, and three colourful animated themes: Synthwave, Bliss and Deep Sea.
 - **Share files**: drag files or folders onto the LightningLAN page, or copy them into your
   Shared folder. Everyone else running LightningLAN on your network sees them within a few
   seconds.
@@ -73,6 +78,13 @@ once.
   them, so it stays fast for everyone. A file you downloaded keeps helping others until you
   remove it from the Downloads list or stop LightningLAN. While files download, a Nyan Cat
   spins next to them; point at it and click to pause, click again to resume.
+- **On your phone** (Android or iPhone, nothing to install): click the phone button at the top
+  right of the page, then point the phone's camera at the QR code and tap the link. The phone
+  has to be on the same Wi-Fi. In the phone's browser you can download anything in
+  ThunderCLOUD and send photos and other files into your Shared folder, where everyone sees them.
+  It works through this computer, so LightningLAN must be running here. **Disconnect phones**
+  in the same window makes every phone scan a new code. If the phone can't connect, see
+  section 4. Phones need the firewall to allow LightningLAN too, and guest Wi-Fi often blocks them.
 - **Settings**: click the gear icon at the top right of the page to change your name, your
   folders (use **Browse…** to pick one) or the passphrase. Changes apply immediately.
 - **Passphrase (optional)**: if you set one, only computers using exactly the same passphrase

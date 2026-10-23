@@ -4,7 +4,7 @@ Peer-to-peer file sharing for everyone on the same local network. There is no se
 no account.
 
 Each person runs LightningLAN and picks a folder to share. Peers find each other automatically
-(mDNS/zeroconf), and everyone sees one combined **Common Space**: every file shared by every
+(mDNS/zeroconf), and everyone sees one combined **ThunderCLOUD**: every file shared by every
 online peer, with its size and who has it. Drag files into the web page to add them to your
 shared folder. Click **Download** to fetch a file directly from the peer that has it.
 
@@ -16,6 +16,9 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
 - Downloads stream to disk, resume after an interruption and are verified piece by piece and
   then as a whole (SHA-256) before they are saved. If a sending peer disappears, the others
   carry on.
+- Phones too: the Android app is a full peer that shares the phone's own files, and any phone
+  (Android or iPhone) can scan a QR code to download from ThunderCLOUD and send photos in its
+  browser, with nothing to install (see [Phones](#phones)).
 - Optional shared passphrase: peers without it can't see or download anything.
 - Light and dark mode, sortable and filterable file list, progress bars and clear errors.
 - Zero setup: default folders and name, a free port, a tray / menu bar icon, and a Settings
@@ -38,7 +41,8 @@ The launch scripts create a virtual environment in `.venv`, install `requirement
 on the first run and when it changes) and start LightningLAN. Your browser then opens
 <http://localhost:8765>, and a lightning-bolt icon appears in the system tray (menu bar on
 macOS). With no arguments, the first run uses `~/LightningLAN/Shared` and `~/LightningLAN/Downloads`
-and the computer's name. You can change these later in the web page's Settings panel.
+and a random funny name (say, "Captain Bandwidth"). You can change these later: the name with
+the pencil next to it at the top of the page, everything in the Settings panel.
 
 **Windows:** double-click `run.bat`, or from a terminal:
 
@@ -56,7 +60,7 @@ chmod +x run.sh   # once, if your copy lost the executable bit
 ```
 
 Do the same on a second computer and the two find each other within a few seconds. Each sees
-the other's files in the Common Space.
+the other's files in ThunderCLOUD.
 
 On first start your OS firewall will probably ask whether to allow Python on the network.
 **Allow it on private networks**, or other computers won't be able to reach you. See
@@ -73,7 +77,9 @@ python -m lightninglan --share <folder> --downloads <folder> --port 8765 --name 
 ```
 
 On start, LightningLAN prints the local UI URL, the LAN address other peers use, and the shared
-and downloads folders, then opens the UI in your default browser.
+and downloads folders, then opens the UI in your default browser. The packaged Windows app opens
+it in a window of its own instead (Edge WebView2, through pywebview; `lightninglan/window.py`),
+and falls back to the browser where WebView2 is missing.
 
 ## Command-line options
 
@@ -120,14 +126,22 @@ locations too.
 ## Using it
 
 - **Header**: your peer name, a lock badge when a passphrase is on, and how many peers are
-  online.
+  online. The pencil next to your name changes it right there; the dice in the editor
+  suggests another funny name (one nobody online is using). A peer that never picked a name
+  gets a random funny one on first start, which it keeps.
+- **Themes**: the half-circle button at the top right cycles through automatic, light, dark
+  and three animated themes: **Synthwave** (an 80s neon sunset with a rolling grid), **Bliss**
+  (sunny hills and drifting clouds, with a nod to Windows XP) and **Deep Sea** (fish, bubbles
+  and swaying seaweed). The choice is remembered by the browser. With "reduce motion" turned
+  on in the system settings, the scenes stand still.
+- **Phone button** (top right): a QR code that opens LightningLAN on a phone. See [Phones](#phones).
 - **Drop zone**: drag files or whole folders onto the page, or click to choose files. They are
   copied into your shared folder. If a name is taken, the copy is saved as `name (1).ext`,
   `name (2).ext`, and so on. Hidden and temporary files (names starting with `.`, `*.tmp`,
   `*.part`, `Thumbs.db`, ...) are skipped. You can also just copy files into the shared folder
   yourself; LightningLAN rescans it every few seconds.
-- **Common Space**: click a column heading to sort, or type in the filter box. Files you
-  already have say "In your share".
+- **ThunderCLOUD** (every file on the network in one list): click a column heading to sort, or
+  type in the filter box. Files you already have say "In your share".
 - **Downloads**: progress, speed and sources, with Pause, Resume and Cancel. Each active
   download shows a spinning Nyan Cat, and so does the top bar while anything downloads. Point
   at the cat for a pause sign: a click pauses, another click resumes (the top-bar cat pauses or
@@ -155,10 +169,50 @@ locations too.
   tray icon or by starting LightningLAN again, brings it back online. If you pressed Stop
   yourself, it stays stopped until you press Start. Browsers may put a long-unused background
   tab to sleep, which counts as closing it. Started with `--no-browser` and never opened, it
-  stays online.
+  stays online. In the Windows app's own window, closing the window counts as closing the page:
+  the window hides, LightningLAN stays in the tray, and opening it again shows the window.
 
-Files only appear in the Common Space after they have been hashed. A very large shared folder
+Files only appear in ThunderCLOUD after they have been hashed. A very large shared folder
 takes a while the first time; after that the hash cache makes restarts quick.
+
+## Phones
+
+There are two ways: the Android app, and the phone page in any phone's browser.
+
+### The Android app
+
+The app in [`android/`](android/README.md) is a full peer, like a computer running LightningLAN:
+it finds the other peers by itself, shares a folder of its own (plus single files picked with
+**Share files**), downloads from everyone with swarms and resume, passes pieces on, and uses
+the same passphrase. Computers see the phone's files in ThunderCLOUD and the phone sees
+theirs; no computer has to relay anything. It shares in the background (with a notification
+and a **Stop** button) until you stop it. For now it is built from source: see
+[android/README.md](android/README.md).
+
+### The phone page (any phone, in the browser)
+
+A phone can also join through a computer running LightningLAN, in the phone's own browser.
+There's no app to install, so Android and iPhone both work.
+
+1. On the computer, click the phone button at the top right. It shows a QR code (and the same
+   link as text) for each network address the computer has.
+2. Scan it with the phone's camera on the same Wi-Fi. The link holds a random key (144 bits),
+   which the phone keeps in a cookie, so it stays connected and can bookmark the page.
+3. The phone page lists ThunderCLOUD. **Get** downloads a file to the phone. Files this computer
+   shares are sent directly. Files that only other peers have are relayed from one of them as
+   they arrive (with the passphrase, if one is set), and their SHA-256 is checked on the way:
+   if the file doesn't match, the phone's download fails rather than finishing with damaged data.
+   **Send files** puts photos and other files into this computer's shared folder, so every peer
+   sees them.
+
+An open phone page counts like an open LightningLAN tab: the computer keeps sharing while it is
+open, even if the computer's own page is closed. The phone button shows a badge while phones
+are connected. **Disconnect phones** in the QR code window replaces the key, so phones need the
+new code. The key lives in the config file. Typing the computer's address
+(`http://<ip>:8765`) on a phone also leads to the phone page.
+
+The phone page isn't a full peer: it only downloads and sends through the computer, and only
+while that computer runs LightningLAN. On Android, the app does all of that by itself.
 
 ## Swarm downloads
 
@@ -254,8 +308,16 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
 - **What swarming reveals.** Your file list includes the hashes of files you are downloading or
   have downloaded (while they are in the Downloads list), so other peers can tell which shared
   files you fetched. Pieces of those files are served only to peers asking for them by hash,
-  that is, peers who can already see the file in someone's share. Everything else (the
-  web UI, uploads, starting downloads, shutdown) only answers requests from this computer. It
+  that is, peers who can already see the file in someone's share.
+- **Phones.** The phone page (`/phone`) and the pages' scripts, styles and pictures
+  (`/static/`) are open to the LAN; neither holds anything private. The phone API
+  (`/phone/api/...`: ThunderCLOUD, downloads, sending files into the share) needs the key from
+  the QR code, kept by the phone as an HttpOnly, SameSite=Lax cookie. Requests that change
+  something also need a custom header and a same-origin `Origin`. Anyone who gets the key, by
+  scanning the code or capturing traffic, can use the phone page until **Disconnect phones** is
+  pressed. The computer's own API stays closed to phones.
+- **This computer only.** Everything else (the web UI, uploads, starting downloads, shutdown,
+  the QR code) only answers requests from this computer. It
   checks the client address is loopback and the `Host` header is `localhost`, which defeats DNS
   rebinding. State-changing requests also need a custom header and a same-origin `Origin`, so
   other websites you visit can't post files into your share.
@@ -308,6 +370,10 @@ disk space for the temp folder. Temp files are deleted as each test passes. On a
 no network connection, use loopback for discovery: `LIGHTNINGLAN_TEST_INTERFACE=127.0.0.1`.
 Run `pytest -m "not integration"` for the fast unit tests only.
 
+The Android app's tests run with Gradle from `android/` (`gradlew :core:test`); they include
+interop tests that run the phone's protocol code against desktop peers started from `.venv`.
+See [android/README.md](android/README.md).
+
 ## Building the desktop app
 
 `build.py` packages LightningLAN with PyInstaller for the OS it runs on:
@@ -357,6 +423,7 @@ packaging/       PyInstaller spec and entry script
 .github/         release workflow (builds and publishes on tag push)
 lightninglan/
   cli.py         entry point: single instance, port choice, startup banner, browser, tray
+  window.py      the Windows app's own window (pywebview, Edge WebView2)
   tray.py        system tray / menu bar icon (pystray)
   desktop.py     file manager, browser, message boxes, folder chooser
   instance.py    one running copy per config folder
@@ -372,20 +439,29 @@ lightninglan/
   netutil.py     choosing which network interfaces to advertise on
   peers.py       peer table, polling and health checks
   indexer.py     scanning the shared folder, SHA-256 hash cache
-  common.py      merging indexes into the Common Space
+  common.py      merging indexes into ThunderCLOUD
+  names.py       the funny names given to peers that haven't picked one
+  phone.py       phones: QR code links, relaying other peers' files with SHA-256 checks
   serving.py     streaming files and pieces to peers, Range requests, the upload limit
   transfers.py   download manager: queue, resume, verification, fall-back to whole files
   swarm.py       swarm downloads: choosing pieces and peers, passing pieces on
   pieces.py      piece sizes, piece hashes, have-maps
   uploads.py     receiving files from the UI
   pathsafe.py    path traversal protection and file-name sanitising
-  static/        the web UI (index.html, app.js, style.css)
+  static/        the web UI (index.html, app.js, style.css; themes/ holds the theme artwork)
+                 and the phone page (phone.html, phone.js)
 tests/           unit tests and a multi-process integration harness
+android/         the Android app (Kotlin): see android/README.md
+  core/          the protocol, ported from lightninglan/ and tested against it
+  app/           screens, background sharing service, discovery, folder access
 ```
 
 ## Known limitations
 
 - Traffic is unencrypted HTTP (see Security).
+- The Android app is built from source for now (it isn't in the release downloads or on Google
+  Play). iPhones only have the phone page, so they can't share a folder of their own or
+  download while no computer runs LightningLAN.
 - Discovery only works within one network segment, and there is no "add a peer by IP address"
   option. IPv4 only.
 - The downloads list is not kept across restarts, but partial files are: downloading the same

@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from .desktop import open_in_file_manager, open_url
+from .desktop import open_in_file_manager
 from .icon import draw_icon
 
 if TYPE_CHECKING:
@@ -28,11 +28,11 @@ def tray_supported() -> bool:
 
 
 class Tray:
-    def __init__(self, node: Node, url: str, log_dir: Path, quit_app: Callable[[], None]):
+    def __init__(self, node: Node, open_ui: Callable[[], None], log_dir: Path, quit_app: Callable[[], None]):
         import pystray  # imported here because it picks and loads a GUI backend on import
 
         self.node = node
-        self.url = url
+        self._open_ui = open_ui  # shows the app window, or opens the web UI in the browser
         self.log_dir = log_dir
         self._quit_app = quit_app
         self._stopped = threading.Event()
@@ -62,7 +62,7 @@ class Tray:
         return run
 
     def open_ui(self) -> None:
-        open_url(self.url)
+        self._open_ui()
 
     def _open_folder(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)

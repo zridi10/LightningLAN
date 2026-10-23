@@ -186,7 +186,7 @@ def start_together(*peers: PeerProcess) -> None:
 
 
 def common_files(peer: PeerProcess) -> dict[str, dict]:
-    """The peer's Common Space keyed by file name."""
+    """The peer's ThunderCLOUD (merged file list) keyed by file name."""
     return {f["name"]: f for f in peer.get("/api/common").json()["files"]}
 
 
