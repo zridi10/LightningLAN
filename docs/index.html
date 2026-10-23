@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LightningLAN: share files at your LAN party</title>
+  <meta name="description" content="Share files with everyone at the LAN party, straight from computer to computer. No internet, no accounts, no setup. Free for Windows and Linux.">
+  <meta name="theme-color" content="#12052a">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://lightninglan.party/">
+  <meta property="og:title" content="LightningLAN">
+  <meta property="og:description" content="Share files with everyone at the LAN party, straight from computer to computer. No internet, no accounts, no setup.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- The app's Synthwave scene: stars, a striped sun, mountains and a rolling neon grid. -->
+  <div class="scene" aria-hidden="true">
+    <div class="sw-stars"></div>
+    <div class="sw-sun"></div>
+    <div class="sw-mountains"></div>
+    <div class="sw-floor"><div class="sw-grid"></div></div>
+  </div>
+
+  <main class="page">
+    <header class="hero">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+      <h1 class="brand">LightningLAN</h1>
+      <p class="tagline">Share files with everyone at the LAN party, straight from computer to computer.
+        No internet, no accounts, no setup.</p>
+    </header>
+
+    <section class="card get" aria-label="Download">
+      <div class="downloads">
+        <a class="dl" href="https://github.com/zridi10/LightningLAN/releases/latest/download/LightningLAN.exe">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z"/></svg>
+          <span><strong>Download for Windows</strong><small>Windows 10 or 11</small></span>
+        </a>
+        <a class="dl" href="https://github.com/zridi10/LightningLAN/releases/latest/download/LightningLAN-linux-x86_64">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v12h16V6H4zm2.3 2.3 3.7 3.7-3.7 3.7-1.4-1.4 2.3-2.3-2.3-2.3 1.4-1.4zM11 14h6v2h-6v-2z"/></svg>
+          <span><strong>Download for Linux</strong><small>64-bit PC</small></span>
+        </a>
+      </div>
+      <a class="dl-small" href="https://github.com/zridi10/LightningLAN/releases/latest/download/LightningLAN-android.apk">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 1h10a2 2 0 0 1 2 2v18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zm0 3v14h10V4H7zm4 15.5h2v1.5h-2v-1.5z"/></svg>
+        Android app (APK)
+      </a>
+      <p class="note">No app on your phone? Any phone can still join from its web browser: scan the QR code
+        in LightningLAN on a computer.</p>
+      <p class="note muted">Free.* Nothing to install: just open it. No Mac version yet.</p>
+      <p class="legal">*for now</p>
+    </section>
+
+    <section class="card" aria-labelledby="games-title">
+      <h2 id="games-title">Games while you wait</h2>
+      <p>Download taking a while? Challenge anyone on the network. Computers and phones all play each other.</p>
+      <ul class="games">
+        <li><span class="icon" aria-hidden="true">❌</span><span><b>Tic-tac-toe</b>Three in a row. You know this one.</span></li>
+        <li><span class="icon" aria-hidden="true">#️⃣</span><span><b>Ultimate tic-tac-toe</b>Nine boards in one. Your move picks their next board.</span></li>
+        <li><span class="icon" aria-hidden="true">🔴</span><span><b>Four in a row</b>Drop discs and line up four.</span></li>
+        <li><span class="icon" aria-hidden="true">🏁</span><span><b>Checkers</b>Jump, chain your jumps, get crowned.</span></li>
+        <li><span class="icon" aria-hidden="true">✏️</span><span><b>Dots and boxes</b>Close a box, keep it, go again.</span></li>
+        <li><span class="icon" aria-hidden="true">🚢</span><span><b>Battleship</b>Hide your fleet, call your shots.</span></li>
+        <li><span class="icon" aria-hidden="true">🃏</span><span><b>Memory match</b>Flip two cards, find the pairs.</span></li>
+        <li><span class="icon" aria-hidden="true">✊</span><span><b>Rock-paper-scissors</b>Lock in, then reveal together. Best of 1 to 7.</span></li>
+        <li><span class="icon" aria-hidden="true">⌨️</span><span><b>Typing race</b>Same sentence. Fastest fingers win.</span></li>
+        <li><span class="icon" aria-hidden="true">➗</span><span><b>Math sprint</b>Ten quick sums. Quickest right answer scores.</span></li>
+      </ul>
+      <h3>On your own</h3>
+      <ul class="games">
+        <li><span class="icon" aria-hidden="true">🧱</span><span><b>Falling blocks</b>Stack them, clear rows, beat your best score.</span></li>
+      </ul>
+    </section>
+
+    <section class="card" id="windows" aria-labelledby="windows-title">
+      <h2 id="windows-title">Windows will warn you (that's okay)</h2>
+      <p>LightningLAN isn't signed with a paid certificate, so Windows is careful the first time you open it.
+        You only do this once:</p>
+      <ol class="steps">
+        <li>If you see <span class="ui">Windows protected your PC</span>, click <span class="ui">More info</span>,
+          then <span class="ui">Run anyway</span>.</li>
+        <li>When the firewall asks, tick <span class="ui">Private networks</span> and click
+          <span class="ui">Allow access</span>. Otherwise the others can't see your files.</li>
+      </ol>
+      <p class="note">No <span class="ui">Run anyway</span> button? Right-click the file, choose
+        <span class="ui">Properties</span>, tick <span class="ui">Unblock</span> and open it again.</p>
+      <p class="note">On Linux, make the file executable first (right-click it, then
+        <span class="ui">Properties</span> › <span class="ui">Permissions</span>), then open it.</p>
+    </section>
+
+    <footer class="footer">
+      <a class="github" href="https://github.com/zridi10/LightningLAN">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.7 16.6 4.1 12l4.6-4.6L7.3 6l-6 6 6 6 1.4-1.4zm6.6 0 4.6-4.6-4.6-4.6L16.7 6l6 6-6 6-1.4-1.4z"/></svg>
+        LightningLAN on GitHub
+      </a>
+      <p class="muted">Stuck? The <a href="https://github.com/zridi10/LightningLAN/blob/main/INSTALL.md">install guide</a>
+        walks through every step.</p>
+    </footer>
+  </main>
+</body>
+</html>

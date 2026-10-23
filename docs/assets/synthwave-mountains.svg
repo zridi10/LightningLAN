@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 200" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="rock" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a1370"/>
+      <stop offset="1" stop-color="#12052a"/>
+    </linearGradient>
+  </defs>
+  <path d="M0 200 L0 120 L70 80 L130 115 L210 50 L290 105 L360 85 L440 135 L520 160 L600 172 L680 160
+           L760 135 L840 90 L910 110 L990 45 L1070 100 L1130 75 L1200 115 L1200 200 Z"
+        fill="url(#rock)" stroke="#ff2fb3" stroke-width="2.5" stroke-linejoin="round"
+        vector-effect="non-scaling-stroke"/>
+  <path d="M210 50 L250 120 M990 45 L950 125 M70 80 L95 140 M1130 75 L1105 135"
+        fill="none" stroke="#36f9c6" stroke-width="1.5" stroke-opacity="0.55" vector-effect="non-scaling-stroke"/>
+</svg>
