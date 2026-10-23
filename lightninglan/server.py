@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 
@@ -24,6 +25,7 @@ from .logs import log_dir
 from .names import random_name
 from .node import STOPPED, Node, SettingsError
 from .phone import COOKIE as PHONE_COOKIE, COOKIE_MAX_AGE, hold_session, phone_links, relay_download
+from .play import PlayError
 from .resources import static_dir
 from .security import AccessControlMiddleware, SecurityHeadersMiddleware
 from .serving import serve_download, serve_piece
@@ -55,6 +57,24 @@ class SettingsUpdate(BaseModel):
     share_dir: str | None = None
     downloads_dir: str | None = None
     passphrase: str | None = None
+
+
+class PlayInvite(BaseModel):
+    peer_id: str
+    kind: str
+    best_of: int = 3
+
+
+class PlayMove(BaseModel):
+    """One move; which field depends on the game (see play.py)."""
+
+    cell: int | None = None  # tic-tac-toe, ultimate, four in a row (column), dots and boxes (line), memory (card)
+    path: list[int] | None = None  # checkers
+    choice: str | None = None  # rock-paper-scissors
+    shot: int | None = None  # battleship
+    shuffle: bool = False  # battleship: place the ships somewhere else
+    ready: bool = False  # battleship: lock the ships in
+    time_ms: int | None = None  # typing race, math sprint
 
 
 class PickFolder(BaseModel):
@@ -134,6 +154,15 @@ def create_app(node: Node) -> FastAPI:
     @app.api_route("/api/download/{file_id}", methods=["GET", "HEAD"])
     def download_file(file_id: str, request: Request) -> Response:
         return serve_download(node.indexer, file_id, request, node.uploads)
+
+    @app.get("/api/games")
+    def published_games(request: Request) -> Response:
+        """This peer's half of its head-to-head games, read by its opponents (see play.py)."""
+        body, etag = node.arcade.published()
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
 
     @app.get("/api/pieces/{file_id}")
     def piece_list(file_id: str) -> Response:
@@ -336,6 +365,63 @@ def create_app(node: Node) -> FastAPI:
     async def new_phone_key() -> dict:
         """Disconnect every phone: the old link and QR code stop working."""
         return await phone_setup(new_key=True)
+
+    # ----- While you wait: head-to-head games (the web UI and the phone page play as this peer) ----
+
+    def play_move(arcade, game_id: str, body: PlayMove) -> dict:
+        if body.choice is not None:
+            return arcade.choose(game_id, body.choice)
+        if body.path is not None:
+            return arcade.move(game_id, body.path)
+        if body.shuffle:
+            return arcade.shuffle_fleet(game_id)
+        if body.ready:
+            return arcade.fleet_ready(game_id)
+        if body.shot is not None:
+            return arcade.fire(game_id, body.shot)
+        if body.time_ms is not None:
+            return arcade.finish(game_id, body.time_ms)
+        return arcade.move(game_id, body.cell if body.cell is not None else -1)
+
+    def play_view(request: Request) -> Response:
+        body = json.dumps(node.arcade.view(), separators=(",", ":")).encode("utf-8")
+        etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
+
+    def play_invite(body: PlayInvite) -> dict:
+        require_online()
+        try:
+            return node.arcade.invite(body.peer_id, body.kind, body.best_of)
+        except PlayError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+    def play_action(game_id: str, action: str, body: PlayMove | None = None) -> dict:
+        arcade = node.arcade
+        actions = {
+            "accept": lambda: arcade.answer(game_id, True),
+            "decline": lambda: arcade.answer(game_id, False),
+            "withdraw": lambda: arcade.withdraw(game_id),
+            "resign": lambda: arcade.resign(game_id),
+            "close": lambda: arcade.close(game_id),
+            "rematch": lambda: arcade.rematch(game_id),
+            "move": lambda: play_move(arcade, game_id, body or PlayMove()),
+        }
+        if action not in actions:
+            raise HTTPException(404, "unknown action")
+        if action in ("accept", "rematch", "move"):
+            require_online()
+        try:
+            return {"game": actions[action]()}
+        except PlayError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+    for prefix in ("/api/play", "/phone/api/play"):
+        app.add_api_route(prefix, play_view, methods=["GET"])
+        app.add_api_route(prefix + "/invite", play_invite, methods=["POST"])
+        app.add_api_route(prefix + "/{game_id}/{action}", play_action, methods=["POST"])
 
     # ----- the phone page (on the LAN, for phones paired with the QR code) ------------------
 

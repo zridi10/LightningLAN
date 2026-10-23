@@ -135,6 +135,7 @@
     if (window.location.hash) history.replaceState(null, '', window.location.pathname);
     holdSession();
     refreshFiles().catch(function () {});
+    window.LightningPlay.mount({ api: '/phone/api/play', client: CLIENT_HEADER, toast: toast });  // play.js
   }
 
   async function refreshStatus() {

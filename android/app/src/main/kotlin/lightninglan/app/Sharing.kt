@@ -21,6 +21,9 @@ import lightninglan.core.DownloadView
 import lightninglan.core.Node
 import lightninglan.core.NodeConfig
 import lightninglan.core.NodeStatus
+import lightninglan.core.PlayError
+import lightninglan.core.PlayView
+import lightninglan.core.GameView
 import lightninglan.core.STOPPED
 import lightninglan.core.deriveKey
 import lightninglan.core.randomName
@@ -51,6 +54,8 @@ data class UiSnapshot(
     val shareFolder: String?,
     val downloadsFolder: String?,
     val addresses: List<String>,
+    /** While you wait: games, invitations and who can play. Null until sharing starts. */
+    val play: PlayView?,
 )
 
 /**
@@ -74,6 +79,10 @@ class Sharing(private val app: Application) {
 
     @Volatile
     private var problem: String? = null
+
+    /** The app is on screen (then game invitations show in it, not as notifications). */
+    @Volatile
+    var appVisible = false
 
     /** Stop was pressed: opening the app again doesn't start sharing by itself. */
     @Volatile
@@ -150,6 +159,7 @@ class Sharing(private val app: Application) {
             shareFolder = settings.shareFolder?.let(::folderLabel),
             downloadsFolder = settings.downloadsFolder?.let(::folderLabel),
             addresses = localAddresses(),
+            play = n?.arcade?.view(),
         )
     }
 
@@ -192,6 +202,45 @@ class Sharing(private val app: Application) {
             toast("That didn't work: ${e.message}")
         }
     }
+
+    // ----- While you wait: head-to-head games ------------------------------------------------------
+
+    /** Runs a game action in the background; [done] gets the game to show, on the main thread. */
+    private fun playAction(done: ((GameView) -> Unit)? = null, block: (lightninglan.core.Arcade) -> GameView?) = actions.execute {
+        val arcade = node?.arcade
+        if (arcade == null) {
+            toast("Start sharing first.")
+            return@execute
+        }
+        try {
+            val game = block(arcade)
+            if (game != null && done != null) main.post { done(game) }
+        } catch (e: PlayError) {
+            toast(e.message ?: "That didn't work.")
+        } catch (e: Exception) {
+            CoreLog.e(TAG, "game action failed", e)
+            toast("That didn't work: ${e.message}")
+        }
+    }
+
+    fun invite(peerId: String, kind: String, bestOf: Int, done: (GameView) -> Unit) =
+        playAction(done) { it.invite(peerId, kind, bestOf) }
+
+    fun answer(gameId: String, accept: Boolean, done: (GameView) -> Unit) = playAction(done) { it.answer(gameId, accept) }
+    fun move(gameId: String, cell: Int) = playAction { it.move(gameId, cell) }
+    fun movePath(gameId: String, path: List<Int>) = playAction { it.movePath(gameId, path) }
+    fun shuffleFleet(gameId: String) = playAction { it.shuffleFleet(gameId) }
+    fun fleetReady(gameId: String) = playAction { it.fleetReady(gameId) }
+    fun fire(gameId: String, cell: Int) = playAction { it.fire(gameId, cell) }
+    fun finish(gameId: String, timeMs: Int) = playAction { it.finish(gameId, timeMs) }
+    fun choose(gameId: String, choice: String) = playAction { it.choose(gameId, choice) }
+    fun resign(gameId: String) = playAction { it.resign(gameId) }
+    fun withdraw(gameId: String) = playAction { it.withdraw(gameId); null }
+    fun closeGame(gameId: String) = playAction { it.close(gameId); null }
+    fun rematch(gameId: String, done: (GameView) -> Unit) = playAction(done) { it.rematch(gameId) }
+
+    /** Invitations waiting for an answer (for the notification while the app is in the background). */
+    fun openInvites() = node?.arcade?.view()?.invites ?: emptyList()
 
     // ----- this phone's files -------------------------------------------------------------------
 

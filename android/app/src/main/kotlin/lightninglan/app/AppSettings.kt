@@ -46,6 +46,11 @@ class AppSettings(context: Context) {
         get() = prefs.getString("theme", null) ?: "auto"
         set(value) = prefs.edit().putString("theme", value).apply()
 
+    /** The best score in the solo falling-blocks game. */
+    var blocksBest: Int
+        get() = prefs.getInt("blocks_best", 0)
+        set(value) = prefs.edit().putInt("blocks_best", value).apply()
+
     val setupDone: Boolean get() = shareFolder != null && downloadsFolder != null
 
     private companion object {

@@ -201,7 +201,7 @@ def smoke_test(command: list[str]) -> None:
             print("  status:", json.loads(body)["name"], flush=True)
             status, page = http("GET", f"{base}/")
             assert status == 200 and b'id="drop-zone"' in page, "the web UI page is missing"
-            for asset in ("app.js", "style.css", "favicon.svg", "phone.js"):
+            for asset in ("app.js", "style.css", "favicon.svg", "phone.js", "play.js", "blocks.js"):
                 assert http("GET", f"{base}/static/{asset}")[0] == 200, f"{asset} is missing"
             status, page = http("GET", f"{base}/phone")
             assert status == 200 and b'id="file-list"' in page, "the phone page is missing"

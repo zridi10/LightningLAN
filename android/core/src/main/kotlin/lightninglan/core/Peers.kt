@@ -68,6 +68,8 @@ class Peer(val peerId: String, name: String, port: Int, addresses: List<String>)
     @Volatile var nextPoll = 0L
     @Volatile var swarm = false // serves piece lists and swarm pieces (LightningLAN 1.1+)
     @Volatile var swarmFiles: Set<String> = emptySet() // files it can pass pieces of
+    @Volatile var play = false // plays head-to-head games (LightningLAN 1.2+)
+    @Volatile var games: Set<String>? = null // which ones (null: the first three, from before it said)
 
     val online: Boolean get() = state == ONLINE
 
@@ -308,6 +310,8 @@ class PeerTable(
         val (swarm, swarmFiles) = parseSwarm(payload as JsonObject)
         peer.swarm = swarm
         peer.swarmFiles = swarmFiles
+        peer.play = (payload["play"] as? JsonPrimitive)?.let { !it.isString && it.content == "1" } == true
+        peer.games = (payload["games"] as? JsonArray)?.take(50)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }?.toSet()
         if (parsed.name.isNotEmpty() && parsed.name != peer.name) peer.name = parsed.name
         if (parsed.files != peer.files || !peer.online) versionCounter.incrementAndGet()
         peer.files = parsed.files

@@ -21,6 +21,7 @@ from .indexer import Indexer
 from .logs import log_dir
 from .netutil import lan_addresses
 from .peers import PeerTable
+from .play import TITLES as GAME_TITLES, Arcade
 from .pieces import PieceInfo
 from .serving import UploadLimiter
 from .transfers import PAUSED, DownloadManager
@@ -48,6 +49,8 @@ class Node:
         )
         self.peers = PeerTable(settings.peer_id, self.auth, settings.refresh_interval)
         self.downloads = DownloadManager(settings.downloads_dir, self.auth, self.peers)
+        self.arcade = Arcade(settings.peer_id, lambda: self.settings.name, self.auth, self.peers,
+                             settings.refresh_interval)
         self.uploads = UploadLimiter(settings.max_upload_rate)
         self.discovery: Discovery | None = None
         if settings.discovery:
@@ -86,6 +89,7 @@ class Node:
     async def start(self) -> None:
         self.indexer.start()
         await self.peers.start()
+        await self.arcade.start()
         if self.discovery is not None:
             await self.discovery.start()
 
@@ -100,6 +104,7 @@ class Node:
                 except Exception:
                     log.exception("stopping discovery failed")
             self.downloads.shutdown()
+            await self.arcade.stop()
             await self.peers.stop()
             self.indexer.stop()
 
@@ -125,6 +130,7 @@ class Node:
                 except Exception:
                     log.exception("stopping discovery failed")
             self._paused_by_stop = await asyncio.to_thread(self.downloads.pause_all)
+            await self.arcade.stop()
             await self.peers.stop()
             self.peers.clear()
             log.info("stopped sharing (%s)", "Stop was pressed" if reason == STOPPED else "the web UI was closed")
@@ -136,6 +142,7 @@ class Node:
                 return
             self.uploads.reopen()
             await self.peers.start()
+            await self.arcade.start()
             if self.discovery is not None:
                 try:
                     await self.discovery.start()
@@ -248,6 +255,8 @@ class Node:
                 "indexing": {"pending": snap.pending},
                 # Its presence says we serve piece lists; the ids are files we can pass pieces of.
                 "swarm": self.downloads.swarm_files(),
+                "play": 1,  # serves GET /api/games: can play head-to-head games (LightningLAN 1.2+)
+                "games": list(GAME_TITLES),  # which ones
             },
             separators=(",", ":"),
         ).encode("utf-8")

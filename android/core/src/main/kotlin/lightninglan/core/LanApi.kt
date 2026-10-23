@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicLong
  *   GET /api/pieces/<id>           its piece hashes (files of more than one piece)
  *   GET /api/swarm/<id>            which pieces of a file we are downloading we have
  *   GET /api/piece/<id>/<n>        one verified piece of such a file
+ *   GET /api/games                 this peer's half of its head-to-head games (Play.kt)
  *
  * Only GET and HEAD. While this peer is stopped they answer 503 and transfers in progress are cut
  * off. With a passphrase they need a valid peer token, and responses carry a proof header.
@@ -20,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong
 private const val STREAM_CHUNK = 256 * 1024
 private val LAN_PREFIXES = listOf("/api/download/", "/api/pieces/", "/api/swarm/", "/api/piece/")
 
-fun isLanRoute(path: String): Boolean = path == "/api/files" || LAN_PREFIXES.any { path.startsWith(it) }
+fun isLanRoute(path: String): Boolean = path == "/api/files" || path == "/api/games" || LAN_PREFIXES.any { path.startsWith(it) }
 
 /** Counts the bytes sent to other peers, and ends every transfer at once when this peer stops sharing. */
 class UploadLimiter {
@@ -145,6 +146,7 @@ class LanApi(private val node: Node) {
     private fun route(req: HttpRequest): HttpResponse {
         val path = req.path
         if (path == "/api/files") return files(req)
+        if (path == "/api/games") return games(req)
         val parts = path.removePrefix("/api/").split("/")
         return when {
             parts.size == 2 && parts[0] == "download" -> serveDownload(parts[1], req)
@@ -160,6 +162,16 @@ class LanApi(private val node: Node) {
 
     private fun files(req: HttpRequest): HttpResponse {
         val (body, etag) = node.filesPayload()
+        if (etagMatches(req.header("if-none-match"), etag)) {
+            return HttpResponse(304).header("ETag", etag).header("Cache-Control", "no-cache")
+        }
+        return HttpResponse(200, BytesBody(body)).header("Content-Type", "application/json")
+            .header("ETag", etag).header("Cache-Control", "no-cache")
+    }
+
+    /** This peer's half of its head-to-head games, read by its opponents (Play.kt). */
+    private fun games(req: HttpRequest): HttpResponse {
+        val (body, etag) = node.arcade.published()
         if (etagMatches(req.header("if-none-match"), etag)) {
             return HttpResponse(304).header("ETag", etag).header("Cache-Control", "no-cache")
         }

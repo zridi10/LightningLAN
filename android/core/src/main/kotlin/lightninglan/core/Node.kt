@@ -77,6 +77,7 @@ class Node(
         http.newBuilder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build(),
     )
     val uploads = UploadLimiter()
+    val arcade = Arcade(peerId, { name }, auth, peers, config.refreshMs, http)
     private val server = HttpServer(LanApi(this)::handle)
 
     // Online: sharing and downloading. Offline: hidden from peers, transfers stopped.
@@ -142,6 +143,7 @@ class Node(
         online = false
         uploads.cutOff()
         downloads.shutdown()
+        arcade.stop()
         peers.stop()
         indexer.stop()
         server.stop()
@@ -170,6 +172,7 @@ class Node(
                 CoreLog.e(TAG, "stopping discovery failed", e)
             }
             pausedByStop = downloads.pauseAll()
+            arcade.stop()
             peers.stop()
             peers.clear()
             CoreLog.i(TAG, "stopped sharing")
@@ -182,6 +185,7 @@ class Node(
             if (online || closing) return
             uploads.reopen()
             peers.start()
+            arcade.start()
             try {
                 discovery?.start(advert(), peers)
             } catch (e: Exception) {
@@ -244,6 +248,8 @@ class Node(
             put("indexing", buildJsonObject { put("pending", snap.pending) })
             // Its presence says we serve piece lists; the ids are files we can pass pieces of.
             put("swarm", buildJsonArray { for (id in downloads.swarmFiles()) add(id) })
+            put("play", 1) // serves GET /api/games: plays head-to-head games (LightningLAN 1.2+)
+            put("games", buildJsonArray { for (kind in GAME_TITLES.keys) add(kind) }) // which ones
         }.toString().toByteArray(Charsets.UTF_8)
         val etag = "\"" + sha256Hex(body).take(32) + "\""
         filesCache = Triple(key, body, etag)

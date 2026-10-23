@@ -224,3 +224,34 @@ def test_ui_flow_end_to_end_on_two_peers(spawn):
     a.proc.wait(timeout=15)
     assert a.proc.returncode == 0
     wait_for(lambda: a.peer_id not in b.online_peer_ids(), timeout=15, message="Bob to see Alice leave")
+
+
+# ----- While you wait (play.js, shared by both pages) --------------------------------------------
+
+PLAY_JS = (STATIC_DIR / "play.js").read_text(encoding="utf-8")
+BLOCKS_JS = (STATIC_DIR / "blocks.js").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("page, script", [(INDEX_HTML, "app.js"), (PHONE_HTML, "phone.js")], ids=["computer", "phone"])
+def test_both_pages_have_the_games_tab(page, script):
+    used = set(re.findall(r"\$\('([\w-]+)'\)", PLAY_JS))
+    defined = set(re.findall(r'id="([\w-]+)"', page))
+    assert {"tab-files", "tab-play", "play-panel", "files-panel", "play", "play-badge"} <= used <= defined
+    # play.js defines LightningPlay before the page's own script calls it.
+    assert page.index('src="/static/blocks.js"') < page.index('src="/static/play.js"') < page.index(f'src="/static/{script}"')
+
+
+@pytest.mark.parametrize("pattern", [r"\.innerHTML\b", r"\.outerHTML\b", r"insertAdjacentHTML", r"document\.write",
+                                     r"\beval\(", r"new Function\("])
+@pytest.mark.parametrize("script", [PLAY_JS, BLOCKS_JS], ids=["play.js", "blocks.js"])
+def test_the_games_scripts_never_build_html_from_strings(pattern, script):
+    assert not re.search(pattern, script)
+
+
+def test_every_game_has_a_board_and_a_description():
+    from lightninglan.play import TITLES
+
+    for kind in TITLES:
+        assert f"{kind}: " in PLAY_JS.split("var ABOUT", 1)[1].split("};", 1)[0], f"no description for {kind}"
+        assert f"'{kind}'" in PLAY_JS.split("var KINDS", 1)[1].split("];", 1)[0], f"{kind} isn't offered"
+        assert f"{kind}: " in PLAY_JS.split("var BOARDS", 1)[1].split("};", 1)[0], f"no board for {kind}"

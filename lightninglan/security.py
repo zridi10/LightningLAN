@@ -1,6 +1,6 @@
 """Access control for the HTTP server, as plain ASGI middleware (it must not buffer streams).
 
-* Only GET/HEAD /api/files, /api/download/{id} and the swarm routes (/api/pieces/{id},
+* Only GET/HEAD /api/files, /api/games, /api/download/{id} and the swarm routes (/api/pieces/{id},
   /api/swarm/{id}, /api/piece/{id}/{n}) are reachable from the LAN. When a
   passphrase is set they require a valid peer token, and responses carry a proof header.
   While this peer is stopped (offline) they answer 503, and transfers in progress are cut off.
@@ -37,7 +37,7 @@ _LAN_PREFIXES = ("/api/download/", "/api/pieces/", "/api/swarm/", "/api/piece/")
 
 
 def is_lan_route(path: str) -> bool:
-    return path == "/api/files" or path.startswith(_LAN_PREFIXES)
+    return path in ("/api/files", "/api/games") or path.startswith(_LAN_PREFIXES)
 
 
 def is_phone_route(path: str) -> bool:

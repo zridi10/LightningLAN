@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.PowerManager
 
 private const val CHANNEL = "sharing"
+private const val GAMES_CHANNEL = "games"
 private const val NOTIFICATION_ID = 1
 private const val ACTION_STOP = "lightninglan.app.STOP"
 private const val REFRESH_MS = 5_000L
@@ -30,9 +31,11 @@ class SharingService : Service() {
     private var wifiLock: WifiManager.WifiLock? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var shown: String? = null
+    private val invitesShown = HashSet<String>()
     private val refresh = object : Runnable {
         override fun run() {
             updateNotification()
+            notifyInvites()
             wakeLock?.acquire(WAKE_LOCK_MS) // renewed while sharing; lapses by itself if this stops running
             handler.postDelayed(this, REFRESH_MS)
         }
@@ -106,6 +109,41 @@ class SharingService : Service() {
         val text = statusText()
         if (text == shown) return
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    /** A notification for each new game invitation (the app shows them itself while it's open). */
+    private fun notifyInvites() {
+        val manager = getSystemService(NotificationManager::class.java)
+        val invites = sharing.openInvites()
+        val ids = invites.map { it.id }.toSet()
+        for (gone in invitesShown - ids) manager.cancel(gone.hashCode())
+        invitesShown.retainAll(ids)
+        for (invite in invites) {
+            if (!invitesShown.add(invite.id) || sharing.appVisible) continue
+            if (manager.getNotificationChannel(GAMES_CHANNEL) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(GAMES_CHANNEL, "Game invitations", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                        description = "When someone on your network challenges you to a game"
+                    },
+                )
+            }
+            val open = PendingIntent.getActivity(
+                this, 2,
+                Intent(this, MainActivity::class.java).putExtra(EXTRA_TAB, "play").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val extra = if (invite.kind == lightninglan.core.RPS) " (best of ${invite.bestOf})" else ""
+            manager.notify(
+                invite.id.hashCode(),
+                Notification.Builder(this, GAMES_CHANNEL)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle("${invite.from.name} challenges you")
+                    .setContentText("${invite.title}$extra. Tap to play.")
+                    .setContentIntent(open)
+                    .setAutoCancel(true)
+                    .build(),
+            )
+        }
     }
 
     private fun buildNotification(text: String): Notification {

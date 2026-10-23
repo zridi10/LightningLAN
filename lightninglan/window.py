@@ -103,25 +103,33 @@ class AppWindow:
             self._window = None
 
     def show(self) -> bool:
-        """Show the window (with the page loaded) and bring it to the front. False if there is none."""
+        """Show the window (with the page loaded) and bring it to the front. False if there is none.
+
+        It happens on a thread of its own: the caller may be the tray icon's thread, and bringing the
+        window to the front sends that thread's windows messages, which it must be free to answer
+        (waiting for the window there would freeze both).
+        """
+        if self._window is None:
+            return False
+        threading.Thread(target=self._show, name="lightninglan-window-show", daemon=True).start()
+        return True
+
+    def _show(self) -> None:
         window = self._window
         if window is None:
-            return False
+            return
         with self._lock:
             try:
                 if not self._page_open:
                     window.load_url(self.url)
                     self._page_open = True
-                window.show()
+                window.show()  # shows and activates it, on the window's own thread
                 if self._minimized:
                     window.restore()
-                window.on_top = True  # Activate() alone may not get past Windows' focus rules
-                window.on_top = False
             except Exception:
                 log.warning("could not show the app window", exc_info=True)
-                return False
+                return
         log.info("app window shown")
-        return True
 
     def destroy(self) -> None:
         """Close the window for good (LightningLAN is quitting); run() then returns."""

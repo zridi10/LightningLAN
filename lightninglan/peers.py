@@ -63,6 +63,8 @@ class Peer:
     next_poll: float = 0.0
     swarm: bool = False  # serves piece lists and swarm pieces (LightningLAN 1.1+)
     swarm_files: frozenset[str] = frozenset()  # files it can pass pieces of (downloading or downloaded)
+    play: bool = False  # plays head-to-head games (LightningLAN 1.2+)
+    games: frozenset[str] | None = None  # which ones (None: the first three, from before it said)
 
     @property
     def online(self) -> bool:
@@ -280,6 +282,9 @@ class PeerTable:
         payload = json.loads(body)
         name, files, pending = parse_index(payload, peer.peer_id)
         peer.swarm, peer.swarm_files = parse_swarm(payload)
+        peer.play = payload.get("play") == 1
+        games = payload.get("games")
+        peer.games = frozenset(g for g in games[:50] if isinstance(g, str)) if isinstance(games, list) else None
         if name and name != peer.name:
             peer.name = name
         if files != peer.files or not peer.online:

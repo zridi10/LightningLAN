@@ -141,17 +141,33 @@ def test_closing_the_window_hides_it_and_leaves_the_page(tmp_path):
     wait_for(lambda: len(w._window.calls) == 2, timeout=5, message="the window to hide")
     assert call_names(w) == ["hide", "load_html"]  # leaving the page ends the web UI's session
     assert w.show() is True  # opening LightningLAN again
+    wait_for(lambda: len(w._window.calls) == 4, timeout=5, message="the window to show")
     assert call_names(w, 2) == ["load_url", "show"]
     assert w._window.calls[2][1] == "http://localhost:8765"
     assert w.show() is True  # already showing the page: no reload
+    wait_for(lambda: len(w._window.calls) == 5, timeout=5, message="the window to show")
     assert call_names(w, 4) == ["show"]
 
 
 def test_a_minimized_window_is_restored_when_shown(tmp_path):
+    from .harness import wait_for
+
     w = app_window(tmp_path)
     w._set_minimized(True)
     w.show()
+    wait_for(lambda: len(w._window.calls) == 2, timeout=5, message="the window to show")
     assert call_names(w) == ["show", "restore"]
+
+
+def test_showing_never_waits_for_the_window(tmp_path):
+    """The tray icon's thread must stay free: bringing the window forward sends it messages."""
+    import threading
+
+    w = app_window(tmp_path)
+    release = threading.Event()
+    w._window.show = lambda: release.wait(5)  # the window's thread is busy
+    assert w.show() is True  # returns at once anyway
+    release.set()
 
 
 def test_quitting_closes_the_window_for_good(tmp_path):

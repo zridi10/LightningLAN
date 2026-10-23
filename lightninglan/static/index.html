@@ -6,6 +6,8 @@
   <title>LightningLAN</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/blocks.js" defer></script>
+  <script src="/static/play.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -109,7 +111,13 @@
     </span>
   </div>
 
-  <main class="layout">
+  <nav class="tabs" role="tablist" aria-label="LightningLAN">
+    <button id="tab-files" class="tab" type="button" role="tab" aria-selected="true" aria-controls="files-panel">Files</button>
+    <button id="tab-play" class="tab" type="button" role="tab" aria-selected="false" aria-controls="play-panel">While you
+      wait<span id="play-badge" class="tab-badge" hidden></span></button>
+  </nav>
+
+  <main id="files-panel" class="layout" role="tabpanel" aria-labelledby="tab-files">
     <section class="main-col">
       <section id="welcome" class="card welcome" hidden>
         <h2>Welcome to LightningLAN</h2>
@@ -194,6 +202,10 @@
         <button id="start-sharing" class="btn start-btn" type="button" hidden>Start LightningLAN</button>
       </section>
     </aside>
+  </main>
+
+  <main id="play-panel" class="play-layout" role="tabpanel" aria-labelledby="tab-play" hidden>
+    <section id="play" class="card play" aria-live="polite"></section>
   </main>
 
   <dialog id="settings" class="dialog" aria-labelledby="settings-title">

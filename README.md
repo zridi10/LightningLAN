@@ -19,6 +19,8 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
 - Phones too: the Android app is a full peer that shares the phone's own files, and any phone
   (Android or iPhone) can scan a QR code to download from ThunderCLOUD and send photos in its
   browser, with nothing to install (see [Phones](#phones)).
+- While you wait: ten head-to-head games against the other computers and phones, from
+  tic-tac-toe to battleship, and a solo falling-blocks game, see [While you wait](#while-you-wait).
 - Optional shared passphrase: peers without it can't see or download anything.
 - Light and dark mode, sortable and filterable file list, progress bars and clear errors.
 - Zero setup: default folders and name, a free port, a tray / menu bar icon, and a Settings
@@ -213,6 +215,57 @@ new code. The key lives in the config file. Typing the computer's address
 
 The phone page isn't a full peer: it only downloads and sends through the computer, and only
 while that computer runs LightningLAN. On Android, the app does all of that by itself.
+
+## While you wait
+
+The **While you wait** tab (next to **Files**) has games to play against anyone else on the network
+while a download runs: on the computer's page, on the phone page, and in the Android app, all
+against each other. **Head-to-head** has ten games:
+
+- **Tic-tac-toe**: three in a row on a 3×3 grid.
+- **Ultimate tic-tac-toe**: nine boards in one. The cell you play in picks the board your
+  opponent must play in next (if that board is already decided, they may pick any open board).
+  Win a small board with three in a row; win the game with three small boards in a row.
+- **Four in a row** (Connect Four): drop discs into seven columns of six; four in a row in any
+  direction wins, a full board is a draw.
+- **Checkers** (English draughts, 8×8): men move diagonally forward, kings both ways. Jumping
+  is compulsory and a chain of jumps must go on while it can; reaching the far row crowns a man
+  and ends the move. You lose with no pieces or no moves; 40 moves each without a capture is a draw.
+  Your pieces are always at the bottom; tap a piece, then where it lands (each landing of a chain).
+- **Dots and boxes** on a 5×5 grid of boxes: closing a box claims it and earns another line.
+- **Battleship**: a 10×10 sea with five ships of 5, 4, 3, 3 and 2 squares (they may touch, but
+  not overlap). Shuffle until you like the fleet, press Ready, then take turns firing. Every shot
+  gets an automatic hit, miss or sunk reply.
+- **Memory match**: 16 cards, 8 pairs. Take turns turning two over; a pair is yours and you go again.
+- **Rock-paper-scissors**, best of 1, 3, 5 or 7. Both players lock in, then both choices are
+  revealed together; ties are replayed.
+- **Typing race**: both players get the same sentence. The clock starts when it appears and
+  stops when it's typed exactly; the quicker time wins.
+- **Math sprint**: ten quick sums (addition, subtraction, multiplication), the same for both.
+  Each sum's point goes to whoever answered it correctly faster; most points wins.
+
+**Solo** has **Falling blocks**, a Tetris-style game: arrow keys move and turn (X and Z turn
+too), Space drops, P pauses; phones get buttons. Every 10 rows cleared it speeds up, and the best
+score is remembered on that device. (Four in a row and Falling blocks are named that way because
+"Connect Four" and "Tetris" are trademarks.)
+
+Pick a game and a player under **Start a game** and press **Challenge**. They get the invitation
+(a notification on Android) and press **Play** or **No thanks**. Whoever was challenged goes
+first in a rematch. The phone page plays as the computer it's connected to.
+
+How it works: every peer publishes only its own half of each game at `GET /api/games` (the games
+it offers, its answer, its moves) and reads its opponent's, polling quickly while a game is on. Both
+sides replay both halves with the same rules (`lightninglan/play.py`, and `Play.kt` in the Android
+app), so a peer can only ever play its own side, and the peer-to-peer API stays read-only. In
+rock-paper-scissors each choice is first published as a SHA-256 hash with a random salt, and only
+revealed once both players have locked in, so nobody can peek; a reveal that doesn't match its hash
+loses the game. Battleship works the same way: each fleet is published only as a hash, the answers
+to shots are worked out by the app, and both fleets are revealed and checked against every answer at
+the end (a fleet that doesn't match loses). The memory match layout, the typing sentence and the
+sums all come from the game's ID, so both sides see the same ones. The typing race and the math
+sprint are timed on each player's own device, so they trust both apps, as memory match does (each
+app knows where the cards are). Older versions of LightningLAN don't list games, so they aren't
+offered as players; versions with only the first three games are offered just those.
 
 ## Swarm downloads
 
@@ -442,6 +495,8 @@ lightninglan/
   common.py      merging indexes into ThunderCLOUD
   names.py       the funny names given to peers that haven't picked one
   phone.py       phones: QR code links, relaying other peers' files with SHA-256 checks
+  play.py        While you wait: the head-to-head games, records, and syncing with opponents
+  games.py       the rules of every head-to-head game (the same as the Android app's Games.kt)
   serving.py     streaming files and pieces to peers, Range requests, the upload limit
   transfers.py   download manager: queue, resume, verification, fall-back to whole files
   swarm.py       swarm downloads: choosing pieces and peers, passing pieces on
@@ -449,7 +504,8 @@ lightninglan/
   uploads.py     receiving files from the UI
   pathsafe.py    path traversal protection and file-name sanitising
   static/        the web UI (index.html, app.js, style.css; themes/ holds the theme artwork)
-                 and the phone page (phone.html, phone.js)
+                 the phone page (phone.html, phone.js), and the games tab both use (play.js,
+                 blocks.js)
 tests/           unit tests and a multi-process integration harness
 android/         the Android app (Kotlin): see android/README.md
   core/          the protocol, ported from lightninglan/ and tested against it

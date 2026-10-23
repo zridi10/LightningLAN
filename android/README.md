@@ -68,6 +68,10 @@ skipped when no such Python environment exists.
   lock and a Wi-Fi lock so computers can reach the phone with the screen off. **Stop** (in the
   app or the notification) leaves the network and ends the service.
 - The peer-to-peer server listens on port 8765 (or the next free one), like the desktop app.
+- **While you wait** (the second tab) has the desktop app's ten head-to-head games, played against
+  computers and other phones alike (`core/.../Games.kt` and `Play.kt`, the same rules and records
+  as `lightninglan/games.py` and `play.py`), and the solo Falling blocks game (`ui/BlocksGame.kt`).
+  Invitations arriving while the app is closed show as notifications.
 - **Themes** are the desktop app's: automatic, light, dark, and the animated Synthwave, Bliss
   and Deep Sea scenes (drawn in `ui/Scenes.kt` after `static/themes`). The theme button in the
   title bar cycles through them; Settings lists them all. With animations turned off in

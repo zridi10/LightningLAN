@@ -43,6 +43,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,6 +56,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -66,6 +70,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -111,7 +116,7 @@ import java.util.Date
 private const val REFRESH_MS = 500L
 
 @Composable
-fun App(sharing: Sharing, theme: AppTheme, onTheme: (AppTheme) -> Unit) {
+fun App(sharing: Sharing, theme: AppTheme, onTheme: (AppTheme) -> Unit, tabRequest: MutableState<String?>) {
     var snap by remember { mutableStateOf(sharing.snapshot()) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
@@ -132,17 +137,22 @@ fun App(sharing: Sharing, theme: AppTheme, onTheme: (AppTheme) -> Unit) {
                 BackHandler { screen = "main" }
                 SettingsScreen(sharing, snap, theme, onTheme, onBack = { screen = "main" })
             }
-            else -> MainScreen(sharing, snap, theme, onTheme, onSettings = { screen = "settings" })
+            else -> MainScreen(sharing, snap, theme, onTheme, tabRequest, onSettings = { screen = "settings" })
         }
     }
 }
 
 /** A screen's frame: see-through over a theme's scene. */
 @Composable
-private fun Screen(topBar: @Composable () -> Unit = {}, content: @Composable (PaddingValues) -> Unit) {
+private fun Screen(
+    topBar: @Composable () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
+    content: @Composable (PaddingValues) -> Unit,
+) {
     val style = LocalAppStyle.current
     Scaffold(
         topBar = topBar,
+        bottomBar = bottomBar,
         containerColor = if (style.scene) Color.Transparent else MaterialTheme.colorScheme.background,
         content = content,
     )
@@ -172,7 +182,7 @@ private fun AppTopBar(
 
 /** A filled button in the theme's style (Bliss: the green Start button; Synthwave: a neon glow). */
 @Composable
-private fun ThemedButton(
+internal fun ThemedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -208,7 +218,7 @@ private fun fieldColors(): TextFieldColors {
 }
 
 @Composable
-private fun headingStyle(): TextStyle {
+internal fun headingStyle(): TextStyle {
     val style = LocalAppStyle.current
     return MaterialTheme.typography.titleMedium.copy(color = style.heading, shadow = style.headingGlow, fontWeight = FontWeight.SemiBold)
 }
@@ -269,9 +279,23 @@ private fun SetupScreen(sharing: Sharing) {
 // ----- the main screen -------------------------------------------------------------------------
 
 @Composable
-private fun MainScreen(sharing: Sharing, snap: UiSnapshot, theme: AppTheme, onTheme: (AppTheme) -> Unit, onSettings: () -> Unit) {
+private fun MainScreen(
+    sharing: Sharing,
+    snap: UiSnapshot,
+    theme: AppTheme,
+    onTheme: (AppTheme) -> Unit,
+    tabRequest: MutableState<String?>,
+    onSettings: () -> Unit,
+) {
     val context = LocalContext.current
     val style = LocalAppStyle.current
+    var tab by rememberSaveable { mutableStateOf("files") }
+    LaunchedEffect(tabRequest.value) {
+        tabRequest.value?.let {
+            tab = it
+            tabRequest.value = null
+        }
+    }
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf("name") }
     var showPeers by remember { mutableStateOf(false) }
@@ -316,7 +340,31 @@ private fun MainScreen(sharing: Sharing, snap: UiSnapshot, theme: AppTheme, onTh
                 },
             )
         },
+        bottomBar = {
+            NavigationBar(containerColor = if (style.scene) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface) {
+                NavigationBarItem(
+                    selected = tab == "files",
+                    onClick = { tab = "files" },
+                    icon = { Icon(AppIcons.Folder, contentDescription = null) },
+                    label = { Text("Files") },
+                )
+                NavigationBarItem(
+                    selected = tab == "play",
+                    onClick = { tab = "play" },
+                    icon = {
+                        BadgedBox(badge = { waitingForYou(snap.play).takeIf { it > 0 }?.let { Badge { Text("$it") } } }) {
+                            Icon(AppIcons.Gamepad, contentDescription = null)
+                        }
+                    },
+                    label = { Text("While you wait") },
+                )
+            }
+        },
     ) { padding ->
+        if (tab == "play") {
+            PlayPanel(sharing, snap.play, online, padding)
+            return@Screen
+        }
         LazyColumn(
             contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),

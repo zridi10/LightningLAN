@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.long
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -358,5 +360,193 @@ class InteropTest {
         waitFor("Desk to see the new name") {
             (desk.get("/api/peers").jsonObject["peers"] as JsonArray).any { it.jsonObject["name"]!!.jsonPrimitive.content == "Captain Bandwidth's Phone" }
         }
+    }
+
+    // ----- While you wait: games between the phone and desktop peers ---------------------------------
+
+    private fun deskGame(desk: DesktopPeer, id: String): JsonObject =
+        desk.get("/api/play").jsonObject["games"]!!.jsonArray.map { it.jsonObject }.first { it["id"]!!.jsonPrimitive.content == id }
+
+    private fun phoneGame(phone: PhonePeer, id: String): GameView = phone.node.arcade.view().games.first { it.id == id }
+
+    private fun players(): Pair<PhonePeer, DesktopPeer> {
+        val phone = phone("Phone")
+        phone.start()
+        val desk = desktop("Desk")
+        waitFor("each to see the other as a player") {
+            phone.node.arcade.view().opponents.any { it.peerId == desk.peerId } &&
+                desk.get("/api/play").jsonObject["opponents"]!!.jsonArray.any {
+                    it.jsonObject["peer_id"]!!.jsonPrimitive.content == phone.node.peerId
+                }
+        }
+        return phone to desk
+    }
+
+    @Test
+    fun `a desktop peer and the phone play tic-tac-toe`() {
+        requirePython()
+        val (phone, desk) = players()
+        val id = desk.post("/api/play/invite", """{"peer_id":"${phone.node.peerId}","kind":"tictactoe"}""")
+            .jsonObject["id"]!!.jsonPrimitive.content
+        waitFor("the phone to get the invitation", 15_000) { phone.node.arcade.view().invites.any { it.id == id } }
+        assertEquals(false, phone.node.arcade.view().invites.single().youGoFirst)
+        phone.node.arcade.answer(id, true)
+        for ((deskTurn, cell) in listOf(true to 0, false to 4, true to 1, false to 8, true to 2)) {
+            if (deskTurn) {
+                waitFor("Desk's turn", 15_000) { deskGame(desk, id)["your_turn"]!!.jsonPrimitive.boolean }
+                desk.post("/api/play/$id/move", """{"cell":$cell}""")
+            } else {
+                waitFor("the phone's turn", 15_000) { phoneGame(phone, id).yourTurn }
+                phone.node.arcade.move(id, cell)
+            }
+        }
+        waitFor("both to see the end", 15_000) {
+            phoneGame(phone, id).status == GAME_OVER && deskGame(desk, id)["status"]!!.jsonPrimitive.content == "over"
+        }
+        assertEquals("lost", phoneGame(phone, id).result)
+        assertEquals("won", deskGame(desk, id)["result"]!!.jsonPrimitive.content)
+        assertEquals(listOf(0, 1, 2), phoneGame(phone, id).line)
+    }
+
+    @Test
+    fun `the phone challenges a desktop peer to rock paper scissors and ultimate tic-tac-toe`() {
+        requirePython()
+        val (phone, desk) = players()
+        val rps = phone.node.arcade.invite(desk.peerId, RPS, bestOf = 3).id
+        waitFor("Desk to get the invitation", 15_000) { desk.get("/api/play").jsonObject["invites"]!!.jsonArray.isNotEmpty() }
+        desk.post("/api/play/$rps/accept")
+        repeat(2) {
+            waitFor("the phone to pick", 15_000) { phoneGame(phone, rps).yourTurn }
+            phone.node.arcade.choose(rps, "rock")
+            waitFor("Desk to pick", 15_000) { deskGame(desk, rps)["your_turn"]!!.jsonPrimitive.boolean }
+            desk.post("/api/play/$rps/move", """{"choice":"scissors"}""")
+        }
+        waitFor("both to see the result", 15_000) {
+            phoneGame(phone, rps).status == GAME_OVER && deskGame(desk, rps)["status"]!!.jsonPrimitive.content == "over"
+        }
+        assertEquals("won", phoneGame(phone, rps).result)
+        assertEquals(2 to 0, phoneGame(phone, rps).rps!!.score)
+        val deskRounds = deskGame(desk, rps)["rps"]!!.jsonObject["rounds"]!!.jsonArray
+        assertEquals(listOf("lost", "lost"), deskRounds.map { it.jsonObject["result"]!!.jsonPrimitive.content })
+
+        val ut = phone.node.arcade.invite(desk.peerId, ULTIMATE).id
+        waitFor("Desk to get the invitation", 15_000) {
+            desk.get("/api/play").jsonObject["invites"]!!.jsonArray.any { it.jsonObject["id"]!!.jsonPrimitive.content == ut }
+        }
+        desk.post("/api/play/$ut/accept")
+        waitFor("the game to start", 15_000) { phoneGame(phone, ut).yourTurn }
+        phone.node.arcade.move(ut, 40) // the centre of the centre board: Desk must answer in the centre board
+        waitFor("Desk's turn", 15_000) { deskGame(desk, ut)["your_turn"]!!.jsonPrimitive.boolean }
+        val allowed = deskGame(desk, ut)["allowed"]!!.jsonArray.map { it.jsonPrimitive.int }
+        assertEquals(listOf(36, 37, 38, 39, 41, 42, 43, 44), allowed)
+        desk.post("/api/play/$ut/move", """{"cell":38}""")
+        waitFor("the phone's turn", 15_000) { phoneGame(phone, ut).yourTurn }
+        assertEquals(2, phoneGame(phone, ut).forced)
+        assertEquals(deskGame(desk, ut)["board"]!!.jsonArray.map { it.jsonPrimitive.content }, phoneGame(phone, ut).board)
+    }
+
+    private fun deskStart(desk: DesktopPeer, phone: PhonePeer, kind: String): String {
+        val id = desk.post("/api/play/invite", """{"peer_id":"${phone.node.peerId}","kind":"$kind"}""").jsonObject["id"]!!.jsonPrimitive.content
+        waitFor("the phone to get the $kind invitation", 15_000) { phone.node.arcade.view().invites.any { it.id == id } }
+        phone.node.arcade.answer(id, true)
+        waitFor("Desk to see $kind start", 15_000) { deskGame(desk, id)["status"]!!.jsonPrimitive.content == "playing" }
+        return id
+    }
+
+    private fun deskTurn(desk: DesktopPeer, id: String) =
+        waitFor("Desk's turn", 15_000) { deskGame(desk, id)["your_turn"]!!.jsonPrimitive.boolean }
+
+    private fun phoneTurn(phone: PhonePeer, id: String) = waitFor("the phone's turn", 15_000) { phoneGame(phone, id).yourTurn }
+
+    @Test
+    fun `battleship between a desktop peer and the phone, fleets checked at the end`() {
+        requirePython()
+        val (phone, desk) = players()
+        val id = deskStart(desk, phone, BATTLESHIP)
+        phone.node.arcade.fleetReady(id)
+        desk.post("/api/play/$id/move", """{"ready":true}""")
+        val phoneShips = shipCells(phone.node.arcade.fleetOf(id)!!)!!.flatten()
+        val elsewhere = (0 until 100).filter { it !in phoneShips }.iterator()
+        for (target in phoneShips) { // Desk knows where to aim; the phone always misses
+            deskTurn(desk, id)
+            desk.post("/api/play/$id/move", """{"shot":$target}""")
+            if (target == phoneShips.last()) break
+            phoneTurn(phone, id)
+            phone.node.arcade.fire(id, elsewhere.next())
+        }
+        waitFor("both to see the end and both fleets", 20_000) {
+            phoneGame(phone, id).battle!!.theirShips.size == 5 &&
+                deskGame(desk, id)["battle"]!!.jsonObject["their_ships"]!!.jsonArray.size == 5
+        }
+        assertEquals("lost", phoneGame(phone, id).result)
+        assertEquals("won", deskGame(desk, id)["result"]!!.jsonPrimitive.content) // the phone's answers checked out
+        assertEquals(5 to 0, phoneGame(phone, id).battle!!.sunk.let { it.second to it.first })
+    }
+
+    @Test
+    fun `the other games cross over between a desktop peer and the phone`() {
+        requirePython()
+        val (phone, desk) = players()
+        // Four in a row: Desk stacks a column.
+        val c4 = deskStart(desk, phone, CONNECT4)
+        repeat(4) { k ->
+            deskTurn(desk, c4)
+            desk.post("/api/play/$c4/move", """{"cell":3}""")
+            if (k < 3) {
+                phoneTurn(phone, c4)
+                phone.node.arcade.move(c4, 4)
+            }
+        }
+        waitFor("the phone to see four in a row", 15_000) { phoneGame(phone, c4).status == GAME_OVER }
+        assertEquals(listOf(17, 24, 31, 38), phoneGame(phone, c4).line)
+        // Checkers: a move each, both boards the same.
+        val ch = deskStart(desk, phone, CHECKERS)
+        deskTurn(desk, ch)
+        val deskMove = deskGame(desk, ch)["allowed"]!!.jsonArray.first().jsonArray.map { it.jsonPrimitive.int }
+        desk.post("/api/play/$ch/move", """{"path":$deskMove}""")
+        phoneTurn(phone, ch)
+        phone.node.arcade.movePath(ch, phoneGame(phone, ch).paths.first())
+        deskTurn(desk, ch)
+        assertEquals(deskGame(desk, ch)["board"]!!.jsonArray.map { it.jsonPrimitive.content }, phoneGame(phone, ch).board)
+        // Memory: the phone knows the layout and takes a pair, then misses.
+        val mem = deskStart(desk, phone, MEMORY)
+        val layout = memoryLayout(mem)
+        deskTurn(desk, mem)
+        desk.post("/api/play/$mem/move", """{"cell":0}""")
+        val miss = (1 until 16).first { layout[it] != layout[0] }
+        desk.post("/api/play/$mem/move", """{"cell":$miss}""")
+        phoneTurn(phone, mem)
+        val pair = (0 until 16).filter { layout[it] == layout[5] }
+        pair.forEach { phone.node.arcade.move(mem, it) }
+        waitFor("Desk to see the phone's pair", 15_000) {
+            deskGame(desk, mem)["score"]!!.jsonArray.map { it.jsonPrimitive.int } == listOf(0, 1)
+        }
+        // Dots and boxes: a few lines, the same picture on both sides.
+        val dots = deskStart(desk, phone, DOTS)
+        deskTurn(desk, dots)
+        desk.post("/api/play/$dots/move", """{"cell":0}""")
+        phoneTurn(phone, dots)
+        phone.node.arcade.move(dots, 59)
+        deskTurn(desk, dots)
+        assertEquals(deskGame(desk, dots)["lines"]!!.jsonArray.map { it.jsonPrimitive.content }, phoneGame(phone, dots).lines)
+        // Typing race and math sprint: each side's own times decide.
+        val typing = deskStart(desk, phone, TYPING)
+        assertEquals(deskGame(desk, typing)["race"]!!.jsonObject["sentence"]!!.jsonPrimitive.content, phoneGame(phone, typing).race!!.sentence)
+        phone.node.arcade.finish(typing, 7_000)
+        desk.post("/api/play/$typing/move", """{"time_ms":9000}""")
+        waitFor("the typing race to end", 15_000) { phoneGame(phone, typing).status == GAME_OVER }
+        assertEquals("won", phoneGame(phone, typing).result)
+        val sprint = deskStart(desk, phone, MATH)
+        assertEquals(
+            deskGame(desk, sprint)["sprint"]!!.jsonObject["problems"]!!.jsonArray.map { it.jsonObject["answer"]!!.jsonPrimitive.int },
+            phoneGame(phone, sprint).sprint!!.problems.map { it.second },
+        )
+        repeat(MATH_PROBLEMS) {
+            phone.node.arcade.finish(sprint, 2_000)
+            desk.post("/api/play/$sprint/move", """{"time_ms":1500}""")
+        }
+        waitFor("the sprint to end", 15_000) { phoneGame(phone, sprint).status == GAME_OVER }
+        assertEquals("lost", phoneGame(phone, sprint).result)
+        assertEquals(0 to 10, phoneGame(phone, sprint).sprint!!.score)
     }
 }

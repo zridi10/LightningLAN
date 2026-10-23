@@ -21,6 +21,7 @@ import lightninglan.app.ui.styleFor
 
 class MainActivity : ComponentActivity() {
     private val sharing: Sharing get() = (application as LightningApp).sharing
+    private val tabRequest = mutableStateOf<String?>(null) // "play" when opened from a game invitation
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -35,23 +36,30 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
             }
             LightningTheme(style) {
-                App(sharing, theme) {
-                    theme = it
-                    sharing.settings.theme = it.key
-                }
+                App(sharing, theme, { theme = it; sharing.settings.theme = it.key }, tabRequest)
             }
         }
-        if (savedInstanceState == null) receiveShared(intent)
+        if (savedInstanceState == null) {
+            receiveShared(intent)
+            intent?.getStringExtra(EXTRA_TAB)?.let { tabRequest.value = it }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         receiveShared(intent)
+        intent.getStringExtra(EXTRA_TAB)?.let { tabRequest.value = it }
     }
 
     override fun onStart() {
         super.onStart()
+        sharing.appVisible = true
         sharing.appOpened()
+    }
+
+    override fun onStop() {
+        sharing.appVisible = false
+        super.onStop()
     }
 
     /** "Share" from another app: the files are copied into the shared folder. */
@@ -70,3 +78,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/** Opens the app on a tab ("play": While you wait). */
+const val EXTRA_TAB = "lightninglan.app.TAB"

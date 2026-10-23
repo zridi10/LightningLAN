@@ -1227,6 +1227,7 @@
 
     holdSession();
     setupDragAndDrop();
+    window.LightningPlay.mount({ api: '/api/play', client: CLIENT_HEADER, toast: toast });  // play.js
     every(5000, refreshStatus);
     every(2000, refreshPeers);
     every(2000, refreshFiles);
