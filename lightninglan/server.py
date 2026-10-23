@@ -63,6 +63,7 @@ class PlayInvite(BaseModel):
     peer_id: str
     kind: str
     best_of: int = 3
+    first: bool | None = None  # this side moves first; by default the other one from the last game, or random
 
 
 class PlayMove(BaseModel):
@@ -290,7 +291,7 @@ def create_app(node: Node) -> FastAPI:
     @app.get("/api/random-name")
     def suggest_name() -> dict:
         """A funny name for the dice button: not ours, and not one an online peer uses."""
-        return {"name": random_name([node.name] + [p.name for p in node.peers.online()])}
+        return {"name": random_name([node.name] + [p.name for p in node.peers.known()])}
 
     @app.post("/api/settings")
     async def update_settings(body: SettingsUpdate) -> dict:
@@ -394,7 +395,7 @@ def create_app(node: Node) -> FastAPI:
     def play_invite(body: PlayInvite) -> dict:
         require_online()
         try:
-            return node.arcade.invite(body.peer_id, body.kind, body.best_of)
+            return node.arcade.invite(body.peer_id, body.kind, body.best_of, body.first)
         except PlayError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
 

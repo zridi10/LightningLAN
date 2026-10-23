@@ -69,6 +69,7 @@ class Peer(val peerId: String, name: String, port: Int, addresses: List<String>)
     @Volatile var swarm = false // serves piece lists and swarm pieces (LightningLAN 1.1+)
     @Volatile var swarmFiles: Set<String> = emptySet() // files it can pass pieces of
     @Volatile var play = false // plays head-to-head games (LightningLAN 1.2+)
+    @Volatile var nameAuto = false // its name was made up by LightningLAN (1.3+), so it gives way when names clash
     @Volatile var games: Set<String>? = null // which ones (null: the first three, from before it said)
 
     val online: Boolean get() = state == ONLINE
@@ -135,6 +136,10 @@ class PeerTable(
     private val peers = ConcurrentHashMap<String, Peer>()
     private val versionCounter = AtomicInteger()
 
+    /** Called after each round of polls (on the poll loop's thread). */
+    @Volatile
+    var afterPoll: (() -> Unit)? = null
+
     /** Bumps whenever the set of online peers or their files change. */
     val version: Int get() = versionCounter.get()
 
@@ -180,6 +185,9 @@ class PeerTable(
     fun online(): List<Peer> = peers.values.filter { it.online }.sortedBy { it.name.lowercase() }
 
     fun ignored(): List<Peer> = peers.values.filter { it.state == IGNORED }
+
+    /** Every peer found, online or not. */
+    fun known(): List<Peer> = peers.values.toList()
 
     // ----- discovery callbacks ---------------------------------------------------------------
 
@@ -244,6 +252,11 @@ class PeerTable(
             if (due.isNotEmpty() && executor != null) {
                 val futures = due.mapNotNull { peer -> runCatching { executor.submit { poll(peer) } }.getOrNull() }
                 for (f in futures) runCatching { f.get() }
+                try {
+                    afterPoll?.invoke()
+                } catch (e: Exception) {
+                    CoreLog.e(TAG, "after-poll check failed", e)
+                }
             }
             synchronized(wakeLock) {
                 if (!wake && running) {
@@ -312,7 +325,11 @@ class PeerTable(
         peer.swarmFiles = swarmFiles
         peer.play = (payload["play"] as? JsonPrimitive)?.let { !it.isString && it.content == "1" } == true
         peer.games = (payload["games"] as? JsonArray)?.take(50)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }?.toSet()
-        if (parsed.name.isNotEmpty() && parsed.name != peer.name) peer.name = parsed.name
+        peer.nameAuto = (payload["name_auto"] as? JsonPrimitive)?.let { !it.isString && it.content == "true" } == true
+        if (parsed.name.isNotEmpty() && parsed.name != peer.name) {
+            peer.name = parsed.name
+            versionCounter.incrementAndGet() // ThunderCLOUD shows its files under the new name
+        }
         if (parsed.files != peer.files || !peer.online) versionCounter.incrementAndGet()
         peer.files = parsed.files
         peer.indexing = parsed.pending

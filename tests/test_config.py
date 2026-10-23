@@ -63,6 +63,19 @@ def test_peers_without_a_saved_name_get_one(tmp_path):
     assert load_settings(tmp_path / "c.json").name == "Den PC", "a chosen name is kept"
 
 
+def test_made_up_names_are_marked_so_they_can_give_way(tmp_path):
+    cfg = tmp_path / "c.json"
+    s = load_settings(cfg, share=tmp_path / "s", downloads=tmp_path / "d")
+    assert s.name_generated and json.loads(cfg.read_text())["name_generated"] is True
+    assert load_settings(cfg).name_generated
+    assert not load_settings(cfg, name="Den PC").name_generated  # picked by the person
+    assert not load_settings(cfg).name_generated
+    # Configs from before 1.3 don't say: a funny name was most likely made up, anything else picked.
+    for name, generated in ((FUNNY_NAMES[3], True), ("Den PC", False)):
+        cfg.write_text(json.dumps({"name": name, "share_dir": str(tmp_path / "s"), "downloads_dir": str(tmp_path / "d")}))
+        assert load_settings(cfg).name_generated is generated
+
+
 def test_random_name_avoids_names_in_use():
     taken = FUNNY_NAMES[:-1]
     assert random_name(taken) == FUNNY_NAMES[-1]

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="synthwave">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -49,9 +49,6 @@
       <span id="peer-pill" class="pill pill-off" role="status" aria-live="polite" hidden>
         <span class="dot" aria-hidden="true"></span><span id="peer-count"></span>
       </span>
-      <button id="theme-toggle" class="icon-btn" type="button" title="Theme: automatic" aria-label="Switch colour theme">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-      </button>
     </div>
   </header>
 
@@ -107,8 +104,10 @@
             <option value="name">A to Z</option>
             <option value="new">Newest</option>
             <option value="size">Largest</option>
+            <option value="sharer">By sharer</option>
           </select>
         </div>
+        <select id="sharer" class="select sharer" aria-label="Show the files shared by" hidden></select>
         <ul id="file-list" class="phone-files"></ul>
         <p id="files-empty" class="empty" hidden></p>
       </div>
@@ -117,6 +116,10 @@
         <section id="play" class="play" aria-live="polite"></section>
       </div>
     </div>
+    <footer class="phone-footer">
+      <label for="theme" class="muted small">Theme</label>
+      <select id="theme" class="select"></select>
+    </footer>
   </main>
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>

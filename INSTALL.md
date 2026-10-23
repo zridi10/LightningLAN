@@ -67,9 +67,10 @@ once.
   your home folder with two folders inside, **Shared** and **Downloads**, and gives you a random
   funny name. A welcome note on the page shows you where your shared folder is.
 - **Your name**: click the pencil next to your name at the top of the page, type a new one and
-  press Enter. The dice button suggests another funny name.
-- **Themes**: click the half-circle button at the top right to switch between automatic, light
-  and dark, and three colourful animated themes: Synthwave, Bliss and Deep Sea.
+  press Enter. The dice button suggests another funny name. If someone else on the network got
+  the same made-up name, one of you gets a new one by itself.
+- **Themes**: pick one in **Settings**. Synthwave is the default; there are also Bliss and Deep
+  Sea (animated too), and plain light and dark.
 - **Share files**: drag files or folders onto the LightningLAN page, or copy them into your
   Shared folder. Everyone else running LightningLAN on your network sees them within a few
   seconds.
@@ -86,7 +87,7 @@ once.
   in the same window makes every phone scan a new code. If the phone can't connect, see
   section 4. Phones need the firewall to allow LightningLAN too, and guest Wi-Fi often blocks them.
 - **Settings**: click the gear icon at the top right of the page to change your name, your
-  folders (use **Browse…** to pick one) or the passphrase. Changes apply immediately.
+  folders (use **Browse…** to pick one), the theme or the passphrase. Changes apply immediately.
 - **Passphrase (optional)**: if you set one, only computers using exactly the same passphrase
   see each other. Leave it empty to share with everyone on your network running LightningLAN.
 - **Opening the page again**: open LightningLAN again. If it's already running, it just opens the

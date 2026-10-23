@@ -8,9 +8,8 @@
   'use strict';
 
   var CLIENT_HEADER = { 'X-LightningLAN-Client': 'phone' };
-  var THEMES = ['auto', 'light', 'dark', 'synthwave', 'bliss', 'deepsea'];  // as on the computer's page
-  var THEME_NAMES = { auto: 'automatic', light: 'light', dark: 'dark', synthwave: 'Synthwave', bliss: 'Bliss',
-    deepsea: 'Deep Sea' };
+  var THEMES = ['synthwave', 'bliss', 'deepsea', 'light', 'dark'];  // as on the computer's page
+  var THEME_NAMES = { synthwave: 'Synthwave', bliss: 'Bliss', deepsea: 'Deep Sea', light: 'Light', dark: 'Dark' };
   var JUNK = { 'thumbs.db': true, 'ehthumbs.db': true, 'desktop.ini': true, '.ds_store': true };
   var TEMP_SUFFIXES = ['.part', '.partial', '.crdownload', '.tmp'];
 
@@ -21,6 +20,7 @@
     filesEtag: null,
     filter: '',
     sort: 'name',
+    sharer: '',  // a peer ID: only the files that peer shares
     session: null,
     failures: 0
   };
@@ -90,24 +90,27 @@
   // ----- theme ----------------------------------------------------------------------------
 
   function storedTheme() {
-    var mode = 'auto';
-    try { mode = localStorage.getItem('lightninglan-theme') || 'auto'; } catch (e) { /* private mode */ }
-    return THEMES.indexOf(mode) === -1 ? 'auto' : mode;
+    var mode = null;
+    try { mode = localStorage.getItem('lightninglan-theme'); } catch (e) { /* private mode */ }
+    return THEMES.indexOf(mode) === -1 ? THEMES[0] : mode;  // Synthwave unless another one was picked
   }
 
   function applyTheme(mode) {
-    if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
-    else document.documentElement.setAttribute('data-theme', mode);
-    var label = 'Theme: ' + THEME_NAMES[mode];
-    $('theme-toggle').title = label;
-    $('theme-toggle').setAttribute('aria-label', label + ' (tap to change)');
+    document.documentElement.setAttribute('data-theme', mode);
   }
 
-  function cycleTheme() {
-    var next = THEMES[(THEMES.indexOf(storedTheme()) + 1) % THEMES.length];
-    try { localStorage.setItem('lightninglan-theme', next); } catch (e) { /* private mode */ }
-    applyTheme(next);
-    toast('Theme: ' + THEME_NAMES[next]);
+  function saveTheme(mode) {
+    try { localStorage.setItem('lightninglan-theme', mode); } catch (e) { /* private mode */ }
+    applyTheme(mode);
+  }
+
+  function fillThemeChoice(select) {
+    THEMES.forEach(function (mode) {
+      var option = el('option', null, THEME_NAMES[mode]);
+      option.value = mode;
+      select.appendChild(option);
+    });
+    select.value = storedTheme();
   }
 
   // ----- connecting: paired, or how to pair ---------------------------------------------------
@@ -185,19 +188,52 @@
 
   var collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
+  function sharerName(s) {
+    return s.self ? (state.status ? state.status.name : 'the computer') : s.name;
+  }
+
   function sortedFiles() {
     var filter = state.filter.trim().toLowerCase();
     var items = state.files.filter(function (f) {
+      if (state.sharer && !f.sources.some(function (s) { return s.peer_id === state.sharer; })) return false;
       return !filter || f.name.toLowerCase().indexOf(filter) !== -1 ||
         f.aliases.some(function (a) { return a.toLowerCase().indexOf(filter) !== -1; });
     });
+    function firstSharer(f) { return f.sources.map(sharerName).sort(collator.compare)[0] || ''; }
     items.sort(function (a, b) {
       var c = 0;
       if (state.sort === 'new') c = b.mtime - a.mtime;
       else if (state.sort === 'size') c = b.size - a.size;
+      else if (state.sort === 'sharer') c = collator.compare(firstSharer(a), firstSharer(b));
       return c || collator.compare(a.name, b.name);
     });
     return items;
+  }
+
+  // The "Shared by" choice: anyone, or one of the computers and phones sharing something right now.
+  function fillSharers() {
+    var select = $('sharer');
+    var sharers = {};
+    state.files.forEach(function (f) {
+      f.sources.forEach(function (s) { sharers[s.peer_id] = sharerName(s); });
+    });
+    if (state.sharer && !sharers[state.sharer]) state.sharer = '';
+    var ids = Object.keys(sharers).sort(function (a, b) { return collator.compare(sharers[a], sharers[b]); });
+    var sig = ids.map(function (id) { return id + '=' + sharers[id]; }).join('|');
+    if (select.dataset.sig !== sig) {
+      select.dataset.sig = sig;
+      select.textContent = '';
+      var all = el('option', null, 'Shared by anyone');
+      all.value = '';
+      select.appendChild(all);
+      ids.forEach(function (id) {
+        var option = el('option', null, sharers[id]);
+        option.value = id;
+        select.appendChild(option);
+      });
+    }
+    select.value = state.sharer;
+    select.hidden = ids.length < 2;
   }
 
   function extension(name) {
@@ -251,6 +287,7 @@
   function renderFiles() {
     if (!state.paired) return;
     var online = !!(state.status && state.status.online);
+    fillSharers();
     var items = sortedFiles();
     var list = $('file-list');
     var rows = document.createDocumentFragment();
@@ -263,7 +300,7 @@
       empty.textContent = 'Nothing shared yet. Send a file from this phone, or wait for computers running ' +
         'LightningLAN to share some.';
     } else if (!items.length) {
-      empty.textContent = 'No files match “' + state.filter.trim() + '”.';
+      empty.textContent = state.filter.trim() ? 'No files match “' + state.filter.trim() + '”.' : 'No files from them.';
     }
     empty.hidden = items.length > 0;
 
@@ -391,7 +428,12 @@
 
   function init() {
     applyTheme(storedTheme());
-    $('theme-toggle').addEventListener('click', cycleTheme);
+    fillThemeChoice($('theme'));
+    $('theme').addEventListener('change', function (e) { saveTheme(e.target.value); });
+    $('sharer').addEventListener('change', function (e) {
+      state.sharer = e.target.value;
+      renderFiles();
+    });
     $('send').addEventListener('click', function () { $('file-input').click(); });
     $('file-input').addEventListener('change', function () {
       queueUploads(Array.prototype.slice.call($('file-input').files));

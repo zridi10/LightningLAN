@@ -386,7 +386,7 @@ class InteropTest {
     fun `a desktop peer and the phone play tic-tac-toe`() {
         requirePython()
         val (phone, desk) = players()
-        val id = desk.post("/api/play/invite", """{"peer_id":"${phone.node.peerId}","kind":"tictactoe"}""")
+        val id = desk.post("/api/play/invite", """{"peer_id":"${phone.node.peerId}","kind":"tictactoe","first":true}""")
             .jsonObject["id"]!!.jsonPrimitive.content
         waitFor("the phone to get the invitation", 15_000) { phone.node.arcade.view().invites.any { it.id == id } }
         assertEquals(false, phone.node.arcade.view().invites.single().youGoFirst)
@@ -412,7 +412,7 @@ class InteropTest {
     fun `the phone challenges a desktop peer to rock paper scissors and ultimate tic-tac-toe`() {
         requirePython()
         val (phone, desk) = players()
-        val rps = phone.node.arcade.invite(desk.peerId, RPS, bestOf = 3).id
+        val rps = phone.node.arcade.invite(desk.peerId, RPS, bestOf = 3, first = true).id
         waitFor("Desk to get the invitation", 15_000) { desk.get("/api/play").jsonObject["invites"]!!.jsonArray.isNotEmpty() }
         desk.post("/api/play/$rps/accept")
         repeat(2) {
@@ -429,7 +429,7 @@ class InteropTest {
         val deskRounds = deskGame(desk, rps)["rps"]!!.jsonObject["rounds"]!!.jsonArray
         assertEquals(listOf("lost", "lost"), deskRounds.map { it.jsonObject["result"]!!.jsonPrimitive.content })
 
-        val ut = phone.node.arcade.invite(desk.peerId, ULTIMATE).id
+        val ut = phone.node.arcade.invite(desk.peerId, ULTIMATE, first = true).id
         waitFor("Desk to get the invitation", 15_000) {
             desk.get("/api/play").jsonObject["invites"]!!.jsonArray.any { it.jsonObject["id"]!!.jsonPrimitive.content == ut }
         }
@@ -446,7 +446,7 @@ class InteropTest {
     }
 
     private fun deskStart(desk: DesktopPeer, phone: PhonePeer, kind: String): String {
-        val id = desk.post("/api/play/invite", """{"peer_id":"${phone.node.peerId}","kind":"$kind"}""").jsonObject["id"]!!.jsonPrimitive.content
+        val id = desk.post("/api/play/invite", """{"peer_id":"${phone.node.peerId}","kind":"$kind","first":true}""").jsonObject["id"]!!.jsonPrimitive.content
         waitFor("the phone to get the $kind invitation", 15_000) { phone.node.arcade.view().invites.any { it.id == id } }
         phone.node.arcade.answer(id, true)
         waitFor("Desk to see $kind start", 15_000) { deskGame(desk, id)["status"]!!.jsonPrimitive.content == "playing" }

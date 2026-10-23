@@ -105,13 +105,16 @@ def test_records_from_other_peers_are_validated():
 
 # ----- two players, without a network ------------------------------------------------------------------
 
-def arcade(me, name, others):
+def arcade(me, name, others, inviter_first=True):
     peers = {pid: SimpleNamespace(peer_id=pid, name=pname, online=True, play=True, games=frozenset(play.TITLES),
                                   base_url=lambda: "")
              for pid, pname in others.items()}
     table = SimpleNamespace(get=peers.get, online=lambda: [p for p in peers.values() if p.online])
     a = Arcade(me, lambda: name, Authenticator(None, me), table, 3.0)
     a.peer_table = peers
+    if inviter_first:  # most tests want the one who invites to move first
+        invite = a.invite
+        a.invite = lambda peer_id, kind, best_of=3, first=True: invite(peer_id, kind, best_of, first)
     return a
 
 
@@ -225,6 +228,33 @@ def test_rock_paper_scissors_locks_in_before_anyone_sees(pair):
     assert (ga["result"], gb["result"]) == ("lost", "won")
 
 
+def test_back_to_back_games_take_turns_going_first():
+    a = arcade(A_ID, "Alice", {B_ID: "Bob"}, inviter_first=False)
+    b = arcade(B_ID, "Bob", {A_ID: "Alice"}, inviter_first=False)
+    gid = a.invite(B_ID, "tictactoe", first=True)["id"]
+    sync(a, b)
+    b.answer(gid, True)
+    sync(a, b)
+    # The next game, of any kind and from either side (not just Rematch): the other one starts.
+    nxt = a.invite(B_ID, "connect4")
+    assert nxt["seat"] == 1
+    sync(a, b)
+    assert b.view()["invites"][0]["you_go_first"] is True
+    b.answer(nxt["id"], True)
+    sync(a, b)
+    assert b.invite(A_ID, "dots")["seat"] == 1  # Bob started the last one: Alice's turn to start
+    # An invitation nobody accepted isn't a game played: it doesn't count.
+    assert a.invite(B_ID, "memory")["seat"] == 0
+    assert a.invite(B_ID, "checkers")["seat"] == 0
+
+
+def test_who_starts_a_first_game_is_random(monkeypatch):
+    for roll, seat in ((0.2, 0), (0.7, 1)):
+        monkeypatch.setattr(play, "_random", SimpleNamespace(random=lambda roll=roll: roll))
+        a = arcade(A_ID, "Alice", {B_ID: "Bob"}, inviter_first=False)
+        assert a.invite(B_ID, "tictactoe")["seat"] == seat
+
+
 def test_a_peer_can_only_play_its_own_side(pair):
     a, b = pair
     gid = a.invite(B_ID, "tictactoe")["id"]
@@ -313,13 +343,14 @@ def test_two_computers_play_tictactoe_and_rock_paper_scissors(spawn):
     gid = a.post("/api/play/invite", json={"peer_id": b.peer_id, "kind": "tictactoe"}).json()["id"]
     wait_for(lambda: b.get("/api/play").json()["invites"], timeout=15, message="B to get the invitation")
     assert b.post(f"/api/play/{gid}/accept").status_code == 200
-    wait_for(lambda: game_of(a, gid)["your_turn"], timeout=15, message="A to see the game start")
-    for player, cell in [(a, 0), (b, 4), (a, 1), (b, 8), (a, 2)]:
+    wait_for(lambda: game_of(a, gid)["status"] == "playing", timeout=15, message="A to see the game start")
+    x, o = (a, b) if game_of(a, gid)["mark"] == "x" else (b, a)  # who starts is random
+    for player, cell in [(x, 0), (o, 4), (x, 1), (o, 8), (x, 2)]:
         wait_for(lambda: game_of(player, gid)["your_turn"], timeout=15, message="a turn")
         r = player.post(f"/api/play/{gid}/move", json={"cell": cell})
         assert r.status_code == 200, r.text
-    wait_for(lambda: game_of(b, gid)["status"] == "over", timeout=15, message="B to see the end")
-    assert (game_of(a, gid)["result"], game_of(b, gid)["result"]) == ("won", "lost")
+    wait_for(lambda: game_of(o, gid)["status"] == "over", timeout=15, message="O to see the end")
+    assert (game_of(x, gid)["result"], game_of(o, gid)["result"]) == ("won", "lost")
 
     rps = b.post("/api/play/invite", json={"peer_id": a.peer_id, "kind": "rps", "best_of": 1}).json()["id"]
     wait_for(lambda: a.get("/api/play").json()["invites"], timeout=15, message="A to get the invitation")

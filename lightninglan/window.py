@@ -16,7 +16,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 BLANK_PAGE = '<!doctype html><title>LightningLAN</title><body style="background:#0e1015"></body>'
-SIZE = (1200, 820)
+SIZE = (1480, 960)  # made smaller on small screens (_fitted_size)
 MIN_SIZE = (720, 520)
 
 
@@ -42,6 +42,24 @@ def _webview2_installed() -> bool:
         if str(version).strip("0.") != "":
             return True
     return False
+
+
+def _fitted_size() -> tuple[int, int]:
+    """SIZE, or less on a screen too small for it, in the 96-DPI pixels pywebview sizes windows in."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        area = wintypes.RECT()
+        if not ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(area), 0):  # SPI_GETWORKAREA
+            return SIZE
+        width, height = area.right - area.left, area.bottom - area.top
+        if ctypes.windll.user32.IsProcessDPIAware():  # then the work area is in real pixels
+            scale = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100 or 1
+            width, height = int(width / scale), int(height / scale)
+    except (AttributeError, OSError):
+        return SIZE
+    return (max(MIN_SIZE[0], min(SIZE[0], width - 48)), max(MIN_SIZE[1], min(SIZE[1], height - 32)))
 
 
 def window_problem() -> str | None:
@@ -85,8 +103,9 @@ class AppWindow:
         import webview
 
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        width, height = _fitted_size()
         window = webview.create_window(
-            "LightningLAN", self.url, width=SIZE[0], height=SIZE[1], min_size=MIN_SIZE, background_color="#0e1015",
+            "LightningLAN", self.url, width=width, height=height, min_size=MIN_SIZE, background_color="#0e1015",
         )
         window.events.closing += self._on_closing
         window.events.minimized += lambda: self._set_minimized(True)

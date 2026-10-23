@@ -137,6 +137,10 @@ FUNNY_NAMES: tuple[str, ...] = (
 )
 
 
+def is_funny_name(name: str) -> bool:
+    return name.casefold() in {n.casefold() for n in FUNNY_NAMES}
+
+
 def random_name(taken: Iterable[str] = ()) -> str:
     """A funny name, avoiding the ones in `taken` (other peers' names) while any are left."""
     used = {name.casefold() for name in taken}

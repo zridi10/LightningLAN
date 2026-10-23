@@ -2,6 +2,7 @@ package lightninglan.app
 
 import android.content.Context
 import android.net.Uri
+import lightninglan.core.isFunnyName
 import lightninglan.core.randomName
 import lightninglan.core.toHex
 import java.util.UUID
@@ -15,8 +16,19 @@ class AppSettings(context: Context) {
 
     /** A funny name until one is picked, remembered from the start. */
     var name: String
-        get() = prefs.getString("name", null) ?: randomName().also { name = it }
+        get() = prefs.getString("name", null) ?: randomName().also {
+            name = it
+            nameGenerated = true
+        }
         set(value) = prefs.edit().putString("name", value).apply()
+
+    /**
+     * The name was made up by the app, not picked: it changes by itself if another device has the
+     * same one. Before 1.3 this wasn't saved; a funny name from then was most likely made up.
+     */
+    var nameGenerated: Boolean
+        get() = if (prefs.contains("name_generated")) prefs.getBoolean("name_generated", false) else isFunnyName(name)
+        set(value) = prefs.edit().putBoolean("name_generated", value).apply()
 
     var passphrase: String?
         get() = prefs.getString("passphrase", null)
@@ -41,9 +53,9 @@ class AppSettings(context: Context) {
         get() = prefs.getString("links", null)?.split('\n')?.filter { it.isNotEmpty() }?.map(Uri::parse) ?: emptyList()
         set(value) = prefs.edit().putString("links", value.joinToString("\n")).apply()
 
-    /** The colour theme's key ("auto", "light", "dark", "synthwave", "bliss" or "deepsea"). */
+    /** The colour theme's key ("synthwave", "bliss", "deepsea", "light" or "dark"); Synthwave until one is picked. */
     var theme: String
-        get() = prefs.getString("theme", null) ?: "auto"
+        get() = prefs.getString("theme", null) ?: "synthwave"
         set(value) = prefs.edit().putString("theme", value).apply()
 
     /** The best score in the solo falling-blocks game. */

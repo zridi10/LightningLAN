@@ -1,5 +1,6 @@
 """The Settings panel's API: reading, validating, saving and applying changes without a restart."""
 
+import asyncio
 import json
 
 import pytest
@@ -51,6 +52,44 @@ def test_rename(peer):
     assert config_of(peer)["name"] == "Den PC"
     assert before["name"] == "Test Peer"
     assert peer.get("/api/files", client=LAN_CLIENT).json()["name"] == "Den PC"  # peers see it on next poll
+
+
+def clash_with(peer, name, name_auto, peer_id="f" * 32):
+    from lightninglan.peers import ONLINE, Peer
+
+    other = Peer(peer_id=peer_id, name=name, port=8765, addresses=("10.9.9.9",), state=ONLINE, name_auto=name_auto)
+    peer.node.peers._peers[other.peer_id] = other
+
+    async def check():
+        peer.node._check_name()
+        await asyncio.gather(*peer.node._tasks)
+
+    asyncio.run(check())
+
+
+def test_a_made_up_name_gives_way_when_another_peer_has_it(peer):
+    peer.node.settings.name_generated = True
+    clash_with(peer, "TEST PEER", name_auto=False)  # a name someone picked, or a peer from before 1.3
+    assert peer.node.name.casefold() != "test peer" and peer.node.settings.name_generated
+    assert config_of(peer)["name"] == peer.node.name and config_of(peer)["name_generated"] is True
+    assert peer.get("/api/files", client=LAN_CLIENT).json()["name_auto"] is True
+
+
+def test_when_both_names_were_made_up_only_one_peer_gives_way(peer):
+    peer.node.settings.name_generated = True
+    clash_with(peer, "Test Peer", name_auto=True, peer_id="f" * 32)  # its ID is larger: it gives way
+    assert peer.node.name == "Test Peer"
+    clash_with(peer, "Test Peer", name_auto=True, peer_id="0" * 32)  # ours is larger: we do
+    assert peer.node.name != "Test Peer"
+
+
+def test_a_picked_name_never_changes_by_itself(peer):
+    assert not peer.node.settings.name_generated  # the fixture picks "Test Peer"
+    clash_with(peer, "Test Peer", name_auto=False)
+    assert peer.node.name == "Test Peer"
+    peer.node.settings.name_generated = True
+    assert save(peer, name="Den PC").status_code == 200
+    assert not peer.node.settings.name_generated and config_of(peer)["name_generated"] is False
 
 
 def test_unchanged_values_change_nothing(peer):

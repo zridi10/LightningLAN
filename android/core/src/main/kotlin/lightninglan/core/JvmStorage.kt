@@ -8,7 +8,7 @@ import java.nio.channels.FileChannel
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 
-/* Storage on plain file paths (desktop JVM tests; the Android app uses the Storage Access Framework). */
+/* Storage on plain file paths: the Android app's own folders (Download/LightningLAN), and the JVM tests. */
 
 const val PARTIAL_DIR_NAME = ".lightninglan-partial"
 
@@ -51,9 +51,9 @@ class PathPartial(file: File) : PartialFile {
     override fun close() = raf.close()
 }
 
-class PathDownloadFolder(private val dir: File) : DownloadFolder {
+/** [label]: how the folder is shown (its path by default). */
+class PathDownloadFolder(private val dir: File, override val label: String = dir.absolutePath) : DownloadFolder {
     override val id: String = dir.absolutePath
-    override val label: String = dir.absolutePath
     private val partialDir = File(dir, PARTIAL_DIR_NAME)
 
     private fun partial(fileId: String) = File(partialDir, "$fileId.part")
@@ -81,7 +81,8 @@ class PathDownloadFolder(private val dir: File) : DownloadFolder {
             } catch (e: FileAlreadyExistsException) {
                 continue
             }
-            return SavedFile(target.absolutePath, target.absolutePath, target.length(), target.lastModified())
+            val shown = if (label == dir.absolutePath) target.absolutePath else "$label/${target.name}"
+            return SavedFile(target.absolutePath, shown, target.length(), target.lastModified())
         }
         throw IOException("could not find a free name for $fileName in $dir")
     }

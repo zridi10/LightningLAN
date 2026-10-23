@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="synthwave">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -93,9 +93,6 @@
       <button id="settings-open" class="icon-btn" type="button" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg>
       </button>
-      <button id="theme-toggle" class="icon-btn" type="button" title="Theme: automatic" aria-label="Switch colour theme">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-      </button>
     </div>
   </header>
 
@@ -150,6 +147,7 @@
             <path class="bolt" d="M13.5 8 9 14h3l-1.5 5L15 13h-3l1.5-5z"/>
           </svg>ThunderCLOUD</h2>
         <span id="file-summary" class="muted"></span>
+        <select id="sharer" class="select sharer" aria-label="Show the files shared by" hidden></select>
         <input id="filter" class="filter" type="search" placeholder="Filter by name…" aria-label="Filter files by name">
       </div>
       <div class="table-wrap">
@@ -158,7 +156,7 @@
             <tr>
               <th data-sort="name" aria-sort="ascending"><button type="button">Name<span class="arrow"></span></button></th>
               <th data-sort="size" class="num"><button type="button">Size<span class="arrow"></span></button></th>
-              <th data-sort="owners"><button type="button">Owner(s)<span class="arrow"></span></button></th>
+              <th data-sort="owners"><button type="button">Shared by<span class="arrow"></span></button></th>
               <th data-sort="mtime" class="hide-narrow"><button type="button">Modified<span class="arrow"></span></button></th>
               <th class="action-col"><span class="sr-only">Download</span></th>
             </tr>
@@ -234,6 +232,11 @@
           <button type="button" class="btn secondary" data-pick="set-downloads">Browse…</button>
         </div>
         <span class="field-help">Where files you download are saved.</span>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="set-theme">Theme</label>
+        <select id="set-theme" class="select"></select>
       </div>
 
       <div class="field">

@@ -22,7 +22,8 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
 - While you wait: ten head-to-head games against the other computers and phones, from
   tic-tac-toe to battleship, and a solo falling-blocks game, see [While you wait](#while-you-wait).
 - Optional shared passphrase: peers without it can't see or download anything.
-- Light and dark mode, sortable and filterable file list, progress bars and clear errors.
+- Themes (Synthwave by default), a file list you can sort and filter by name or by who shares
+  it, progress bars and clear errors.
 - Zero setup: default folders and name, a free port, a tray / menu bar icon, and a Settings
   panel in the web page for everything else.
 
@@ -129,22 +130,26 @@ locations too.
 
 - **Header**: your peer name, a lock badge when a passphrase is on, and how many peers are
   online. The pencil next to your name changes it right there; the dice in the editor
-  suggests another funny name (one nobody online is using). A peer that never picked a name
-  gets a random funny one on first start, which it keeps.
-- **Themes**: the half-circle button at the top right cycles through automatic, light, dark
-  and three animated themes: **Synthwave** (an 80s neon sunset with a rolling grid), **Bliss**
-  (sunny hills and drifting clouds, with a nod to Windows XP) and **Deep Sea** (fish, bubbles
-  and swaying seaweed). The choice is remembered by the browser. With "reduce motion" turned
-  on in the system settings, the scenes stand still.
+  suggests another funny name (one no other peer is using). A peer that never picked a name
+  gets a random funny one on first start, which it keeps, unless another peer turns out to have
+  the same one: then the made-up name gives way and a free one is picked by itself (when both
+  were made up, only one of the two changes). A name you picked yourself never changes.
+- **Themes**, picked in **Settings**: three animated themes, **Synthwave** (an 80s neon sunset
+  with a rolling grid; the default), **Bliss** (sunny hills and drifting clouds, with a nod to
+  Windows XP) and **Deep Sea** (fish, bubbles and swaying seaweed), plus plain light and dark.
+  The choice is remembered by the browser (the phone page has its own, at the bottom). With
+  "reduce motion" turned on in the system settings, the scenes stand still.
 - **Phone button** (top right): a QR code that opens LightningLAN on a phone. See [Phones](#phones).
 - **Drop zone**: drag files or whole folders onto the page, or click to choose files. They are
   copied into your shared folder. If a name is taken, the copy is saved as `name (1).ext`,
   `name (2).ext`, and so on. Hidden and temporary files (names starting with `.`, `*.tmp`,
   `*.part`, `Thumbs.db`, ...) are skipped. You can also just copy files into the shared folder
   yourself; LightningLAN rescans it every few seconds.
-- **ThunderCLOUD** (every file on the network in one list): click a column heading to sort, or
-  type in the filter box. Files you already have say "In your share".
-- **Downloads**: progress, speed and sources, with Pause, Resume and Cancel. Each active
+- **ThunderCLOUD** (every file on the network in one list): click a column heading to sort
+  (**Shared by** sorts by who shares it), type in the filter box, or pick one peer in the
+  **Shared by anyone** list to see only their files. Files you already have say "In your share".
+- **Downloads**: progress, speed and sources, with Pause, Resume and Cancel. A long list scrolls
+  in its own box. Each active
   download shows a spinning Nyan Cat, and so does the top bar while anything downloads. Point
   at the cat for a pause sign: a click pauses, another click resumes (the top-bar cat pauses or
   resumes all downloads). Up to three downloads run at once; more wait as *queued*. While a download runs, the data goes to
@@ -155,7 +160,7 @@ locations too.
 - **Peers**: everyone online with their file counts. Peers that were found but rejected (for
   example, a different passphrase) are listed separately with the reason.
 - **Settings** (the gear icon): your name, the shared and downloads folders (with a
-  **Browse…** button that opens the system's folder chooser) and the passphrase. Changes apply
+  **Browse…** button that opens the system's folder chooser), the theme and the passphrase. Changes apply
   immediately, without a restart. Peers see a new name within seconds. A new shared folder is
   indexed from scratch. Downloads already started finish in the old downloads folder. After a
   passphrase change, every peer is checked again.
@@ -184,8 +189,10 @@ There are two ways: the Android app, and the phone page in any phone's browser.
 ### The Android app
 
 The app in [`android/`](android/README.md) is a full peer, like a computer running LightningLAN:
-it finds the other peers by itself, shares a folder of its own (plus single files picked with
-**Share files**), downloads from everyone with swarms and resume, passes pieces on, and uses
+it finds the other peers by itself, shares a folder of its own (made on first start, like the
+desktop app's: `Download/LightningLAN/Shared`, with `Download/LightningLAN/Downloads` next to it),
+plus single files picked with **Share files**, downloads from everyone with swarms and resume,
+passes pieces on, and uses
 the same passphrase. Computers see the phone's files in ThunderCLOUD and the phone sees
 theirs; no computer has to relay anything. It shares in the background (with a notification
 and a **Stop** button) until you stop it. For now it is built from source: see
@@ -250,8 +257,9 @@ score is remembered on that device. (Four in a row and Falling blocks are named 
 "Connect Four" and "Tetris" are trademarks.)
 
 Pick a game and a player under **Start a game** and press **Challenge**. They get the invitation
-(a notification on Android) and press **Play** or **No thanks**. Whoever was challenged goes
-first in a rematch. The phone page plays as the computer it's connected to.
+(a notification on Android) and press **Play** or **No thanks**. Games played back to back
+against the same player take turns going first (with **Rematch** or a new challenge, of any
+game); otherwise who starts is random. The phone page plays as the computer it's connected to.
 
 How it works: every peer publishes only its own half of each game at `GET /api/games` (the games
 it offers, its answer, its moves) and reads its opponent's, polling quickly while a game is on. Both

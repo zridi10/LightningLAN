@@ -659,7 +659,8 @@ class Arcade(
 
     private fun randomHex(bytes: Int): String = ByteArray(bytes).also { random.nextBytes(it) }.toHex()
 
-    fun invite(peerId: String, kind: String, bestOf: Int = 3, first: Boolean = true): GameView {
+    /** Challenge a player. Who moves first: [first] if given, else see [goesFirstAgainst]. */
+    fun invite(peerId: String, kind: String, bestOf: Int = 3, first: Boolean? = null): GameView {
         if (kind !in GAME_TITLES) throw PlayError("Unknown game.", 400)
         if (kind == RPS && bestOf !in BEST_OF) throw PlayError("Best of 1, 3, 5 or 7.", 400)
         val peer = peers.get(peerId)
@@ -667,9 +668,10 @@ class Arcade(
         if (!peer.play) throw PlayError("${peer.name} has an older LightningLAN without games.", 409)
         if (kind !in (peer.games ?: ORIGINAL_KINDS)) throw PlayError("${peer.name}'s LightningLAN doesn't have ${GAME_TITLES[kind]} yet.", 409)
         synchronized(lock) {
+            val meFirst = first ?: goesFirstAgainst(peerId)
             makeRoom()
-            val players = if (first) listOf(me, peerId) else listOf(peerId, me)
-            val names = if (first) listOf(ownName(), peer.name) else listOf(peer.name, ownName())
+            val players = if (meFirst) listOf(me, peerId) else listOf(peerId, me)
+            val names = if (meFirst) listOf(ownName(), peer.name) else listOf(peer.name, ownName())
             val record = GameRecord(randomHex(16), kind, players, names, me, if (kind == RPS) bestOf else 1, OFFERED)
             val g = Game(record)
             games[record.id] = g
@@ -677,6 +679,14 @@ class Arcade(
             CoreLog.i(TAG, "invited ${peer.name} to ${GAME_TITLES[kind]}")
             return gameView(g)
         }
+    }
+
+    /** Back-to-back games against the same player take turns going first; otherwise it's random. */
+    private fun goesFirstAgainst(peerId: String): Boolean {
+        val last = games.values // in the order they were made, so a tie on the clock goes to the later one
+            .filter { peerId in it.mine.players && outcome(it).status in setOf(GAME_PLAYING, GAME_OVER) }
+            .sortedBy { it.created }.lastOrNull() ?: return random.nextBoolean()
+        return last.mine.players[0] != me
     }
 
     private fun makeRoom() {

@@ -128,6 +128,8 @@ val FUNNY_NAMES: List<String> = listOf(
     "Jellybean Genie",
 )
 
+fun isFunnyName(name: String): Boolean = FUNNY_NAMES.any { it.equals(name, ignoreCase = true) }
+
 /** A funny name, avoiding the ones in [taken] (other peers' names) while any are left. */
 fun randomName(taken: Collection<String> = emptyList()): String {
     val used = taken.map { it.lowercase() }.toSet()

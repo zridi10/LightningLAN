@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,7 +24,9 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -79,7 +80,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -99,6 +104,7 @@ import kotlinx.coroutines.withContext
 import lightninglan.app.BuildConfig
 import lightninglan.app.Sharing
 import lightninglan.app.UiSnapshot
+import lightninglan.app.storagePermissionNeeded
 import lightninglan.core.ACTIVE_STATES
 import lightninglan.core.CANCELED
 import lightninglan.core.COMPLETED
@@ -132,12 +138,12 @@ fun App(sharing: Sharing, theme: AppTheme, onTheme: (AppTheme) -> Unit, tabReque
     Box(Modifier.fillMaxSize().background(if (style.scene) Color.Transparent else MaterialTheme.colorScheme.background)) {
         ThemeScene(style)
         when {
-            !snap.setupDone -> SetupScreen(sharing)
+            !snap.setupDone -> FirstRun(sharing, snap.problem)
             screen == "settings" -> {
                 BackHandler { screen = "main" }
                 SettingsScreen(sharing, snap, theme, onTheme, onBack = { screen = "main" })
             }
-            else -> MainScreen(sharing, snap, theme, onTheme, tabRequest, onSettings = { screen = "settings" })
+            else -> MainScreen(sharing, snap, tabRequest, onSettings = { screen = "settings" })
         }
     }
 }
@@ -225,53 +231,35 @@ internal fun headingStyle(): TextStyle {
 
 // ----- first run -------------------------------------------------------------------------------
 
+/**
+ * First run: like the desktop app, nothing to choose. The app asks for what it needs (notifications;
+ * storage on Android 10 and older), makes its folders and starts sharing; Settings can change it all.
+ */
 @Composable
-private fun SetupScreen(sharing: Sharing) {
+private fun FirstRun(sharing: Sharing, problem: String?) {
     val context = LocalContext.current
-    var name by rememberSaveable { mutableStateOf(sharing.settings.name) }
-    var working by remember { mutableStateOf(false) }
-    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            working = true
-            sharing.setUp(uri, name) { working = false }
-        }
-    }
-    val downloadFolder = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download")
-    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        pickFolder.launch(downloadFolder)
+    var asked by rememberSaveable { mutableStateOf(false) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { sharing.setUp() }
+    LaunchedEffect(Unit) {
+        if (asked) return@LaunchedEffect // turned the phone while the question was up
+        asked = true
+        val notifications = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
+        val wanted = listOfNotNull(
+            notifications?.takeIf { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED },
+            storagePermissionNeeded(context),
+        )
+        if (wanted.isEmpty()) sharing.setUp() else ask.launch(wanted.toTypedArray())
     }
     Screen { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(24.dp),
+            Modifier.fillMaxSize().padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(Modifier.height(24.dp))
             Logo(56)
             Text("Welcome to LightningLAN", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Share files between this phone and your computers on the same Wi-Fi. Files go straight from device " +
-                    "to device and never leave your network.",
-            )
-            NameField(name, onChange = { name = it }, onDice = { name = sharing.suggestName() }, label = "Name for this phone")
-            Text(
-                "Next, choose a folder for LightningLAN, for example Download › LightningLAN (you can make a new folder " +
-                    "there). It gets two folders: Shared, for what this phone shares, and Downloads, for what you get from others.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ThemedButton(
-                onClick = {
-                    val needsPermission = Build.VERSION.SDK_INT >= 33 &&
-                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                    if (needsPermission) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) else pickFolder.launch(downloadFolder)
-                },
-                enabled = !working && name.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(AppIcons.Folder, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (working) "Setting up…" else "Choose a folder")
-            }
+            Text(problem ?: "Getting ready…", color = if (problem != null) MaterialTheme.colorScheme.error else Color.Unspecified)
+            if (problem != null) ThemedButton(onClick = sharing::setUp) { Text("Try again") }
         }
     }
 }
@@ -282,8 +270,6 @@ private fun SetupScreen(sharing: Sharing) {
 private fun MainScreen(
     sharing: Sharing,
     snap: UiSnapshot,
-    theme: AppTheme,
-    onTheme: (AppTheme) -> Unit,
     tabRequest: MutableState<String?>,
     onSettings: () -> Unit,
 ) {
@@ -298,6 +284,7 @@ private fun MainScreen(
     }
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf("name") }
+    var sharer by rememberSaveable { mutableStateOf<String?>(null) } // a peer ID: only the files it shares
     var showPeers by remember { mutableStateOf(false) }
     val shareFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) sharing.shareInPlace(uris)
@@ -305,12 +292,20 @@ private fun MainScreen(
     val online = snap.status?.online == true
     val latest = snap.downloads.groupBy { it.fileId }.mapValues { (_, list) -> list.maxBy { it.createdAt } }
     val words = query.lowercase().split(' ').filter { it.isNotEmpty() }
+    // Everyone sharing something right now: this phone first, then by name.
+    val sharers = snap.files.flatMap { it.sources }
+        .associate { it.peerId to (if (it.self) "This phone" else it.name) }
+        .entries.sortedWith(compareBy({ it.value != "This phone" }, { it.value.lowercase() }))
+    val onlyFrom = sharer?.takeIf { id -> sharers.any { it.key == id } } // gone: everyone again
+    fun firstSharer(f: CommonFile) = f.sources.minOfOrNull { (if (it.self) "" else it.name).lowercase() } ?: ""
     val shown = snap.files
+        .filter { f -> onlyFrom == null || f.sources.any { it.peerId == onlyFrom } }
         .filter { f -> words.all { w -> w in f.name.lowercase() || f.sources.any { w in it.name.lowercase() } } }
         .let { files ->
             when (sort) {
                 "new" -> files.sortedByDescending { it.mtime }
                 "size" -> files.sortedByDescending { it.size }
+                "sharer" -> files.sortedBy(::firstSharer)
                 else -> files
             }
         }
@@ -331,11 +326,6 @@ private fun MainScreen(
                 },
                 actions = {
                     PeersPill(snap.peers.size, online) { showPeers = true }
-                    IconButton(onClick = {
-                        val next = theme.next()
-                        onTheme(next)
-                        Toast.makeText(context, "Theme: ${next.label}", Toast.LENGTH_SHORT).show()
-                    }) { Icon(AppIcons.Theme, contentDescription = "Theme: ${theme.label} (tap to change)") }
                     IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
                 },
             )
@@ -391,7 +381,7 @@ private fun MainScreen(
                         }
                     }
                 }
-                items(snap.downloads, key = { "d" + it.id }) { DownloadRow(sharing, it) }
+                item(key = "download-list") { DownloadList(sharing, snap.downloads) }
             }
             item(key = "cloud") {
                 SectionHeader("ThunderCLOUD", if (snap.files.size == 1) "1 file" else "${snap.files.size} files") {}
@@ -407,9 +397,22 @@ private fun MainScreen(
                         colors = fieldColors(),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((key, label) in listOf("name" to "Name", "new" to "Newest", "size" to "Largest")) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((key, label) in listOf("name" to "Name", "new" to "Newest", "size" to "Largest", "sharer" to "Sharer")) {
                             FilterChip(selected = sort == key, onClick = { sort = key }, label = { Text(label) })
+                        }
+                    }
+                    if (sharers.size > 1) {
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Shared by", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            FilterChip(selected = onlyFrom == null, onClick = { sharer = null }, label = { Text("Anyone") })
+                            for ((id, name) in sharers) {
+                                FilterChip(selected = onlyFrom == id, onClick = { sharer = id }, label = { Text(name) })
+                            }
                         }
                     }
                 }
@@ -418,7 +421,7 @@ private fun MainScreen(
                 item(key = "empty") {
                     Text(
                         when {
-                            snap.files.isNotEmpty() -> "No file matches “$query”."
+                            snap.files.isNotEmpty() -> if (query.isNotBlank()) "No file matches “$query”." else "No files from them."
                             !online -> "Start sharing to see the files on your other devices."
                             snap.peers.isEmpty() -> "No files yet. Open LightningLAN on a computer on this Wi-Fi, or share files from this phone."
                             else -> "No files yet."
@@ -598,13 +601,39 @@ private fun ExtensionBadge(name: String) {
 
 // ----- downloads -------------------------------------------------------------------------------
 
+/** The downloads scroll in a box of their own, so a long list doesn't push the files down the screen. */
+@Composable
+private fun DownloadList(sharing: Sharing, downloads: List<DownloadView>) {
+    val scroll = rememberScrollState()
+    val thumb = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(max = 320.dp)
+            .drawWithContent {
+                drawContent()
+                if (scroll.maxValue > 0) { // a slim scrollbar on the right
+                    val visible = size.height / (size.height + scroll.maxValue)
+                    val length = size.height * visible
+                    val top = (size.height - length) * scroll.value / scroll.maxValue
+                    drawRoundRect(thumb, Offset(size.width - 4.dp.toPx(), top), Size(3.dp.toPx(), length), CornerRadius(2.dp.toPx()))
+                }
+            }
+            .verticalScroll(scroll)
+            .padding(end = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        for (d in downloads) DownloadRow(sharing, d)
+    }
+}
+
 @Composable
 private fun DownloadRow(sharing: Sharing, d: DownloadView) {
     val context = LocalContext.current
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 10.dp).fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(d.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(d.name, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 when (d.status) {
                     QUEUED, DOWNLOADING, VERIFYING -> {
                         IconButton(onClick = { sharing.pause(d.id) }) { Icon(AppIcons.Pause, contentDescription = "Pause") }
@@ -692,13 +721,13 @@ private fun SettingsScreen(sharing: Sharing, snap: UiSnapshot, theme: AppTheme, 
                     enabled = name.isNotBlank() && name.trim() != savedName,
                 ) { Text("Save name") }
             }
-            Setting("Theme", "The same themes as on the computer.") {
+            Setting("Theme", null) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (option in AppTheme.entries) {
                         FilterChip(
                             selected = option == theme,
                             onClick = { onTheme(option) },
-                            label = { Text(option.label.replaceFirstChar { it.uppercase() }) },
+                            label = { Text(option.label) },
                         )
                     }
                 }

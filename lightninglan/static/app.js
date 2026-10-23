@@ -11,9 +11,8 @@
   var ACTIVE = { queued: true, downloading: true, verifying: true };
   var JUNK = { 'thumbs.db': true, 'ehthumbs.db': true, 'desktop.ini': true, '.ds_store': true };
   var TEMP_SUFFIXES = ['.part', '.partial', '.crdownload', '.tmp'];
-  var THEMES = ['auto', 'light', 'dark', 'synthwave', 'bliss', 'deepsea'];  // the theme button cycles through these
-  var THEME_NAMES = { auto: 'automatic', light: 'light', dark: 'dark', synthwave: 'Synthwave', bliss: 'Bliss',
-    deepsea: 'Deep Sea' };
+  var THEMES = ['synthwave', 'bliss', 'deepsea', 'light', 'dark'];  // the first one is the default
+  var THEME_NAMES = { synthwave: 'Synthwave', bliss: 'Bliss', deepsea: 'Deep Sea', light: 'Light', dark: 'Dark' };
 
   var state = {
     status: null,
@@ -24,6 +23,7 @@
     downloads: [],
     sort: { key: 'name', dir: 1 },
     filter: '',
+    sharer: '',  // a peer ID: only the files that peer shares
     knownPeers: null,
     downloadStatus: {},
     exited: false,  // LightningLAN quit (the page has nothing left to talk to)
@@ -108,24 +108,27 @@
   // ----- theme ----------------------------------------------------------------------------
 
   function storedTheme() {
-    var mode = 'auto';
-    try { mode = localStorage.getItem('lightninglan-theme') || 'auto'; } catch (e) { /* private mode */ }
-    return THEMES.indexOf(mode) === -1 ? 'auto' : mode;
+    var mode = null;
+    try { mode = localStorage.getItem('lightninglan-theme'); } catch (e) { /* private mode */ }
+    return THEMES.indexOf(mode) === -1 ? THEMES[0] : mode;  // Synthwave unless another one was picked
   }
 
   function applyTheme(mode) {
-    if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
-    else document.documentElement.setAttribute('data-theme', mode);
-    var label = 'Theme: ' + THEME_NAMES[mode];
-    $('theme-toggle').title = label;
-    $('theme-toggle').setAttribute('aria-label', label + ' (click to change)');
+    document.documentElement.setAttribute('data-theme', mode);
   }
 
-  function cycleTheme() {
-    var next = THEMES[(THEMES.indexOf(storedTheme()) + 1) % THEMES.length];
-    try { localStorage.setItem('lightninglan-theme', next); } catch (e) { /* private mode */ }
-    applyTheme(next);
-    toast('Theme: ' + THEME_NAMES[next]);
+  function saveTheme(mode) {
+    try { localStorage.setItem('lightninglan-theme', mode); } catch (e) { /* private mode */ }
+    applyTheme(mode);
+  }
+
+  function fillThemeChoice(select) {
+    THEMES.forEach(function (mode) {
+      var option = el('option', null, THEME_NAMES[mode]);
+      option.value = mode;
+      select.appendChild(option);
+    });
+    select.value = storedTheme();
   }
 
   // ----- header and status ----------------------------------------------------------------
@@ -395,6 +398,7 @@
     $('set-pass').value = s.passphrase;
     $('set-pass').type = 'password';
     $('set-pass-toggle').textContent = 'Show';
+    $('set-theme').value = storedTheme();
     $('set-url').textContent = s.url;
     $('set-config').textContent = s.config_path || '';
     document.querySelectorAll('[data-pick]').forEach(function (b) { b.hidden = !s.can_pick_folder; });
@@ -408,6 +412,7 @@
     var dialog = $('settings');
     if (typeof dialog.close === 'function') dialog.close();
     else dialog.removeAttribute('open');
+    applyTheme(storedTheme());  // a theme tried out but not saved
   }
 
   async function saveSettings(e) {
@@ -420,6 +425,7 @@
       if (value !== s[key]) body[key] = value;
     });
     if ($('set-pass').value !== s.passphrase) body.passphrase = $('set-pass').value;
+    saveTheme($('set-theme').value);
     if (!Object.keys(body).length) { closeSettings(); return; }
     var save = $('settings-save');
     save.disabled = true;
@@ -559,6 +565,7 @@
     var dir = state.sort.dir;
     var filter = state.filter.trim().toLowerCase();
     var items = state.files.filter(function (f) {
+      if (state.sharer && !f.sources.some(function (s) { return s.peer_id === state.sharer; })) return false;
       return !filter || f.name.toLowerCase().indexOf(filter) !== -1 ||
         f.aliases.some(function (a) { return a.toLowerCase().indexOf(filter) !== -1; });
     });
@@ -566,7 +573,7 @@
       var c = 0;
       if (key === 'size') c = a.size - b.size;
       else if (key === 'mtime') c = a.mtime - b.mtime;
-      else if (key === 'owners') c = (b.sources.length - a.sources.length) || collator.compare(ownerSortKey(a), ownerSortKey(b));
+      else if (key === 'owners') c = collator.compare(ownerSortKey(a), ownerSortKey(b)) || (b.sources.length - a.sources.length);
       if (c === 0) c = collator.compare(a.name, b.name);
       return c * dir;
     });
@@ -606,8 +613,37 @@
     cell.appendChild(btn);
   }
 
+  // The "Shared by" choice: everyone, or one of the peers sharing something right now.
+  function fillSharers() {
+    var select = $('sharer');
+    var sharers = {};
+    state.files.forEach(function (f) {
+      f.sources.forEach(function (s) { sharers[s.peer_id] = { name: s.self ? 'You' : s.name, self: s.self }; });
+    });
+    if (state.sharer && !sharers[state.sharer]) state.sharer = '';  // went offline, or shares nothing now
+    var ids = Object.keys(sharers).sort(function (a, b) {
+      return (sharers[b].self ? 1 : 0) - (sharers[a].self ? 1 : 0) || collator.compare(sharers[a].name, sharers[b].name);
+    });
+    var sig = ids.map(function (id) { return id + '=' + sharers[id].name; }).join('|');
+    if (select.dataset.sig !== sig) {  // rebuilt only when the sharers change, so an open list stays open
+      select.dataset.sig = sig;
+      select.textContent = '';
+      var all = el('option', null, 'Shared by anyone');
+      all.value = '';
+      select.appendChild(all);
+      ids.forEach(function (id) {
+        var option = el('option', null, sharers[id].name);
+        option.value = id;
+        select.appendChild(option);
+      });
+    }
+    select.value = state.sharer;
+    select.hidden = ids.length < 2;
+  }
+
   function renderFiles() {
     var tbody = $('file-rows');
+    fillSharers();
     var items = sortedFiles();
     var rows = document.createDocumentFragment();
     items.forEach(function (f) {
@@ -650,7 +686,7 @@
       empty.textContent = 'Nothing shared yet. Drop files above to share them, or wait for other computers ' +
         'running LightningLAN to appear.';
     } else if (!items.length) {
-      empty.textContent = 'No files match “' + state.filter.trim() + '”.';
+      empty.textContent = state.filter.trim() ? 'No files match “' + state.filter.trim() + '”.' : 'No files from them.';
     }
     empty.hidden = items.length > 0;
 
@@ -1177,7 +1213,13 @@
 
   function init() {
     applyTheme(storedTheme());
-    $('theme-toggle').addEventListener('click', cycleTheme);
+    fillThemeChoice($('set-theme'));
+    $('set-theme').addEventListener('change', function (e) { applyTheme(e.target.value); });  // try it out
+    $('settings').addEventListener('close', function () { applyTheme(storedTheme()); });  // closed with Esc
+    $('sharer').addEventListener('change', function (e) {
+      state.sharer = e.target.value;
+      renderFiles();
+    });
     $('name-edit').addEventListener('click', startNameEdit);
     $('name-form').addEventListener('submit', saveName);
     $('name-dice').addEventListener('click', rollName);

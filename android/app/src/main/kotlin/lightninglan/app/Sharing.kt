@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import lightninglan.core.CommonFile
 import lightninglan.core.CoreLog
 import lightninglan.core.DownloadError
+import lightninglan.core.DownloadFolder
 import lightninglan.core.DownloadView
 import lightninglan.core.Node
 import lightninglan.core.NodeConfig
@@ -26,8 +27,10 @@ import lightninglan.core.PlayView
 import lightninglan.core.GameView
 import lightninglan.core.STOPPED
 import lightninglan.core.deriveKey
+import lightninglan.core.numberedNames
 import lightninglan.core.randomName
 import lightninglan.core.safeLocalFilename
+import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -72,7 +75,7 @@ class Sharing(private val app: Application) {
     private var node: Node? = null
 
     @Volatile
-    private var shareTree: SafShareTree? = null
+    private var shareTree: PhoneShareTree? = null
 
     @Volatile
     private var busy: String? = null
@@ -123,7 +126,7 @@ class Sharing(private val app: Application) {
     }
 
     private fun createNode(): Node {
-        val tree = SafShareTree(app, settings.shareFolder, settings.links)
+        val tree = PhoneShareTree(app, settings.shareFolder, settings.links)
         shareTree = tree
         val config = NodeConfig(
             peerId = settings.peerId,
@@ -132,9 +135,18 @@ class Sharing(private val app: Application) {
             stateDir = app.filesDir,
             port = PORT,
             passphraseKey = settings.passphraseKey,
+            nameGenerated = settings.nameGenerated,
         )
-        return Node(config, tree, settings.downloadsFolder?.let { SafDownloadFolder(app, it) }, NsdDiscovery(app))
+        return Node(config, tree, settings.downloadsFolder?.let(::downloadFolderAt), NsdDiscovery(app)).also {
+            it.onRenamed = { name -> // another device had the same made-up name
+                settings.name = name
+                settings.nameGenerated = true
+            }
+        }
     }
+
+    private fun downloadFolderAt(folder: Uri): DownloadFolder =
+        folder.localFolder()?.let { LocalDownloadFolder(app, it) } ?: SafDownloadFolder(app, folder)
 
     // ----- what the screens show ---------------------------------------------------------------
 
@@ -244,26 +256,25 @@ class Sharing(private val app: Application) {
 
     // ----- this phone's files -------------------------------------------------------------------
 
-    /** First run: [tree] is the folder the person picked; Shared and Downloads go inside it. [failed] runs if that doesn't work. */
-    fun setUp(tree: Uri, name: String, failed: () -> Unit) = control.execute {
+    /**
+     * First run: makes the Shared and Downloads folders (Download/LightningLAN on the phone, like
+     * the desktop app's ~/LightningLAN) and starts sharing. Nothing to choose; Settings can change them.
+     */
+    fun setUp() = control.execute {
+        if (settings.setupDone) return@execute
         try {
-            keepAccess(tree, write = true)
-            val folder = treeFolder(tree)
-            val share = subfolder(app, folder, "Shared")
-            val downloads = subfolder(app, folder, "Downloads")
-            settings.name = cleanName(name) ?: settings.name
-            settings.shareFolder = share
-            settings.downloadsFolder = downloads
+            val (share, downloads) = makeDefaultFolders(app)
+            settings.shareFolder = Uri.fromFile(share)
+            settings.downloadsFolder = Uri.fromFile(downloads)
+            CoreLog.i(TAG, "made the folders in ${share.parent}")
             node?.let {
-                it.setName(settings.name)
                 applyShareTree(it)
-                it.setDownloadFolder(SafDownloadFolder(app, downloads))
+                it.setDownloadFolder(LocalDownloadFolder(app, downloads))
             }
             main.post { start() }
         } catch (e: Exception) {
-            CoreLog.e(TAG, "setting up the folders failed", e)
-            toast("Could not use that folder: ${e.message}")
-            main.post(failed)
+            CoreLog.e(TAG, "making the folders failed", e)
+            problem = "Could not make the LightningLAN folders: ${e.message}"
         }
     }
 
@@ -282,7 +293,7 @@ class Sharing(private val app: Application) {
             keepAccess(tree, write = true)
             val folder = treeFolder(tree)
             settings.downloadsFolder = folder
-            node?.setDownloadFolder(SafDownloadFolder(app, folder))
+            node?.setDownloadFolder(downloadFolderAt(folder))
         } catch (e: Exception) {
             toast("Could not use that folder: ${e.message}")
         }
@@ -322,7 +333,7 @@ class Sharing(private val app: Application) {
     fun importFiles(uris: List<Uri>) = actions.execute {
         val folder = settings.shareFolder
         if (folder == null) {
-            toast("Open LightningLAN and choose a folder first.")
+            toast("Open LightningLAN first, then share the files again.")
             return@execute
         }
         var done = 0
@@ -349,6 +360,19 @@ class Sharing(private val app: Application) {
     private fun copyIntoFolder(source: Uri, folder: Uri) {
         val resolver = app.contentResolver
         val name = safeLocalFilename(queryName(resolver, source) ?: "shared file", fallback = "shared file")
+        folder.localFolder()?.let { dir ->
+            val target = numberedNames(name).take(10_000).map { File(dir, it) }.firstOrNull { !it.exists() }
+                ?: throw IOException("no free name for $name")
+            try {
+                resolver.openInputStream(source).use { input ->
+                    target.outputStream().use { output -> (input ?: throw IOException("could not read $name")).copyTo(output, 1024 * 1024) }
+                }
+            } catch (e: Exception) {
+                target.delete()
+                throw e
+            }
+            return
+        }
         val mime = resolver.getType(source) ?: "application/octet-stream"
         val target = DocumentsContract.createDocument(resolver, folder, mime, name) ?: throw IOException("could not create $name")
         try {
@@ -373,7 +397,7 @@ class Sharing(private val app: Application) {
     }
 
     private fun applyShareTree(n: Node) {
-        val tree = SafShareTree(app, settings.shareFolder, settings.links)
+        val tree = PhoneShareTree(app, settings.shareFolder, settings.links)
         shareTree = tree
         n.setShareTree(tree)
     }
@@ -385,14 +409,16 @@ class Sharing(private val app: Application) {
 
     // ----- settings ----------------------------------------------------------------------------
 
+    /** A name the person picked (even with the dice): it never changes by itself. */
     fun rename(name: String): Boolean {
         val cleaned = cleanName(name) ?: return false
         settings.name = cleaned
+        settings.nameGenerated = false
         control.execute { node?.setName(cleaned) }
         return true
     }
 
-    fun suggestName(): String = randomName(listOf(settings.name) + (node?.peers?.online()?.map { it.name } ?: emptyList()))
+    fun suggestName(): String = randomName(listOf(settings.name) + (node?.peers?.known()?.map { it.name } ?: emptyList()))
 
     /** Deriving the key takes a moment, so this runs in the background. Empty turns the passphrase off. */
     fun setPassphrase(passphrase: String, done: () -> Unit) = control.execute {
@@ -409,7 +435,7 @@ class Sharing(private val app: Application) {
 
     /** An intent that opens one of this phone's shared files, or a finished download. */
     fun openIntent(fileId: String?, savedLocation: String?, name: String): Intent? {
-        val uri = savedLocation?.let(Uri::parse)
+        val uri = savedLocation?.let { if (it.startsWith("/")) shareableUri(app, File(it)) else Uri.parse(it) }
             ?: fileId?.let { id -> node?.indexer?.lookup(id)?.key?.let { key -> shareTree?.uriFor(key) } }
             ?: return null
         val ext = name.substringAfterLast('.', "").lowercase()

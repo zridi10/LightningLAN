@@ -2,6 +2,7 @@ package lightninglan.core
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -69,6 +70,30 @@ class NodeHttpTest {
     private fun sha(data: ByteArray) = MessageDigest.getInstance("SHA-256").digest(data).toHex()
 
     private fun json(resp: Response): JsonObject = Json.parseToJsonElement(resp.body!!.string()).jsonObject
+
+    @Test
+    fun `a made-up name gives way to another peer with the same name`() {
+        node.setName("Test Phone", generated = true)
+        var saved: String? = null
+        node.onRenamed = { saved = it }
+        val otherId = "2".repeat(32)
+        node.peers.serviceFound(ServiceRecord("svc-other", otherId, "TEST PHONE", listOf("127.0.0.9"), 1, false))
+        val other = node.peers.get(otherId)!!.apply {
+            state = ONLINE
+            nameAuto = true
+        }
+        node.checkName() // both made up: the one with the larger ID gives way, and that's the other one
+        assertEquals("Test Phone", node.name)
+        other.nameAuto = false // a picked name, or a peer from before 1.3
+        node.checkName()
+        assertTrue(node.name.lowercase() != "test phone" && node.nameGenerated)
+        assertEquals(node.name, saved)
+        assertEquals(true, json(get("/api/files"))["name_auto"]!!.jsonPrimitive.boolean)
+        node.setName("Test Phone") // picked by the person: never changes by itself
+        node.checkName()
+        assertEquals("Test Phone", node.name)
+        assertEquals(false, json(get("/api/files"))["name_auto"]!!.jsonPrimitive.boolean)
+    }
 
     @Test
     fun `the index lists shareable files with an ETag`() {

@@ -590,7 +590,8 @@ class Arcade:
             raise PlayError("No such game.", 404)
         return g
 
-    def invite(self, peer_id: str, kind: str, best_of: int = 3, first: bool = True) -> dict:
+    def invite(self, peer_id: str, kind: str, best_of: int = 3, first: bool | None = None) -> dict:
+        """Challenge a player. Who moves first: `first` if given, else see _goes_first_against."""
         if kind not in TITLES:
             raise PlayError("Unknown game.", 400)
         if kind == RPS and best_of not in BEST_OF:
@@ -603,6 +604,8 @@ class Arcade:
         if kind not in (peer.games if peer.games is not None else {TICTACTOE, ULTIMATE, RPS}):
             raise PlayError(f"{peer.name}'s LightningLAN doesn't have {TITLES[kind]} yet.", 409)
         with self._lock:
+            if first is None:
+                first = self._goes_first_against(peer_id)
             self._make_room()
             players = (self.me, peer_id) if first else (peer_id, self.me)
             names = (self.own_name(), peer.name) if first else (peer.name, self.own_name())
@@ -613,6 +616,15 @@ class Arcade:
             self._changed()
             log.info("invited %s to %s", peer.name, TITLES[kind])
             return self._game_view(g)
+
+    def _goes_first_against(self, peer_id: str) -> bool:
+        """Back-to-back games against the same player take turns going first; otherwise it's random."""
+        played = [g for g in self._games.values()
+                  if peer_id in g.mine.players and self.outcome(g).status in (PLAYING, OVER)]
+        if not played:
+            return _random.random() < 0.5
+        last = sorted(played, key=lambda g: g.created)[-1]  # in the order they were made: a tie goes to the later one
+        return last.mine.players[0] != self.me
 
     def _make_room(self) -> None:
         if len(self._games) < MAX_GAMES:

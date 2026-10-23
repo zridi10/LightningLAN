@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .names import random_name
+from .names import is_funny_name, random_name
 
 DEFAULT_PORT = 8765
 DEFAULT_REFRESH_INTERVAL = 3.0
@@ -60,6 +60,9 @@ class Settings:
     passphrase: str | None = None
     phone_key: str | None = None  # the secret in the phone link (QR code); None until a phone is first set up
     config_path: Path | None = None
+    # The name was made up by LightningLAN, not picked by the person: it changes by itself if another
+    # peer turns out to have the same one (Node._check_name).
+    name_generated: bool = False
     # Runtime-only options (never written to the config file).
     interfaces: list[str] | None = None
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
@@ -153,10 +156,15 @@ def load_settings(
     stored_name = data.get("name") if isinstance(data.get("name"), str) else ""
     if name is not None:
         resolved_name = clean_display_name(name)
+        generated = False
     elif stored_name.strip():
         resolved_name = clean_display_name(stored_name)
+        stored_generated = data.get("name_generated")
+        # Configs from before 1.3 don't say: a funny name in one of them was most likely made up.
+        generated = stored_generated if isinstance(stored_generated, bool) else is_funny_name(resolved_name)
     else:
         resolved_name = random_name()  # never picked a name: a funny one, remembered from now on
+        generated = True
     share_dir = Path(share if share is not None else data.get("share_dir") or default_share_dir())
     downloads_dir = Path(
         downloads if downloads is not None else data.get("downloads_dir") or default_downloads_dir()
@@ -186,6 +194,7 @@ def load_settings(
         phone_key=phone_key,
         config_path=path,
         first_run=first_run,
+        name_generated=generated,
     )
 
     if save:
@@ -198,6 +207,7 @@ def load_settings(
         )
         if name is not None or not stored_name.strip():
             updated["name"] = resolved_name
+        updated["name_generated"] = generated
         if updated != data:
             try:
                 write_config_file(path, updated)

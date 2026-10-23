@@ -13,18 +13,22 @@ import android.system.Os
 import lightninglan.core.DownloadFolder
 import lightninglan.core.PARTIAL_DIR_NAME
 import lightninglan.core.PartialFile
+import lightninglan.core.PathReadable
 import lightninglan.core.ReadableFile
 import lightninglan.core.SavedFile
 import lightninglan.core.ShareTree
 import lightninglan.core.TreeEntry
 import lightninglan.core.numberedNames
+import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.nio.ByteBuffer
+import java.nio.file.Files
 
 /*
  * The shared and downloads folders through the Storage Access Framework: the person picks a
- * folder once and the app keeps access to it. A folder is a document URI inside that grant.
+ * folder in Settings once and the app keeps access to it. A folder is a document URI inside that
+ * grant. The folders the app makes by itself are plain paths instead (LocalFolders.kt).
  */
 
 private val CHILD_COLUMNS = arrayOf(
@@ -89,6 +93,7 @@ private fun ContentResolver.children(folder: Uri, documentId: String): List<Chil
 
 /** A name to show for a folder, like "Download/LightningLAN/Shared". */
 fun folderLabel(folder: Uri): String {
+    folder.localFolder()?.let { return localFolderLabel(it) }
     val id = try {
         DocumentsContract.getDocumentId(folder)
     } catch (e: IllegalArgumentException) {
@@ -108,25 +113,25 @@ fun folderLabel(folder: Uri): String {
 /** A folder's document URI inside the tree the person picked (the tree's own folder). */
 fun treeFolder(tree: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
 
-/** The subfolder [name] of [folder], created if it doesn't exist yet. */
-fun subfolder(context: Context, folder: Uri, name: String): Uri {
-    val resolver = context.contentResolver
-    val parentId = DocumentsContract.getDocumentId(folder)
-    resolver.children(folder, parentId)?.firstOrNull { it.name == name && it.isDirectory }?.let {
-        return DocumentsContract.buildDocumentUriUsingTree(folder, it.id)
-    }
-    return DocumentsContract.createDocument(resolver, folder, Document.MIME_TYPE_DIR, name)
-        ?: throw IOException("could not create the $name folder")
-}
-
-/** Shares a folder and, at its top level, the files picked one by one ([links]). */
-class SafShareTree(context: Context, private val folder: Uri?, private val links: List<Uri>) : ShareTree {
+/**
+ * Shares a folder (a picked one, or one of the app's own on a plain path) and, at its top level,
+ * the files picked one by one ([links]).
+ */
+class PhoneShareTree(private val context: Context, private val folder: Uri?, private val links: List<Uri>) : ShareTree {
     private val resolver = context.contentResolver
+    private val dir: File? = folder?.localFolder()
     override val id: String = "saf:" + (folder?.toString() ?: "")
 
     override fun list(directoryKey: String?): List<TreeEntry>? {
-        if (directoryKey != null) return listFolder(directoryKey.removePrefix("doc:"))
-        val top = folder?.let { listFolder(DocumentsContract.getDocumentId(it)) } ?: emptyList()
+        if (directoryKey != null) {
+            return if (directoryKey.startsWith("file:")) listDir(File(directoryKey.removePrefix("file:")))
+            else listFolder(directoryKey.removePrefix("doc:"))
+        }
+        val top = when {
+            dir != null -> listDir(dir)
+            folder != null -> listFolder(DocumentsContract.getDocumentId(folder))
+            else -> null
+        } ?: emptyList()
         val taken = top.map { it.name.lowercase() }.toMutableSet()
         return top + links.mapNotNull { linkEntry(it, taken) }
     }
@@ -134,6 +139,10 @@ class SafShareTree(context: Context, private val folder: Uri?, private val links
     private fun listFolder(documentId: String): List<TreeEntry>? {
         val f = folder ?: return null
         return resolver.children(f, documentId)?.map { TreeEntry(it.name, "doc:" + it.id, it.isDirectory, it.size, it.mtimeMs) }
+    }
+
+    private fun listDir(d: File): List<TreeEntry>? = d.listFiles()?.filter { !Files.isSymbolicLink(it.toPath()) }?.map {
+        TreeEntry(it.name, "file:" + it.absolutePath, it.isDirectory, if (it.isDirectory) 0 else it.length(), it.lastModified())
     }
 
     private fun linkEntry(uri: Uri, taken: MutableSet<String>): TreeEntry? {
@@ -156,6 +165,10 @@ class SafShareTree(context: Context, private val folder: Uri?, private val links
     }
 
     override fun open(key: String): ReadableFile? {
+        if (key.startsWith("file:")) {
+            val file = File(key.removePrefix("file:"))
+            return if (file.isFile) runCatching { PathReadable(file) }.getOrNull() else null
+        }
         val uri = when {
             key.startsWith("doc:") -> DocumentsContract.buildDocumentUriUsingTree(folder ?: return null, key.removePrefix("doc:"))
             key.startsWith("link:") -> Uri.parse(key.removePrefix("link:"))
@@ -173,6 +186,7 @@ class SafShareTree(context: Context, private val folder: Uri?, private val links
 
     /** The document URI of a shared file, to open it in another app. */
     fun uriFor(key: String): Uri? = when {
+        key.startsWith("file:") -> shareableUri(context, File(key.removePrefix("file:")))
         key.startsWith("doc:") -> folder?.let { DocumentsContract.buildDocumentUriUsingTree(it, key.removePrefix("doc:")) }
         key.startsWith("link:") -> Uri.parse(key.removePrefix("link:"))
         else -> null

@@ -35,6 +35,8 @@ class NodeConfig(
     val port: Int = 8765,
     /** The passphrase's key from [deriveKey], or null for no passphrase. */
     val passphraseKey: ByteArray? = null,
+    /** The name was made up, not picked: it changes by itself if another peer has the same one. */
+    val nameGenerated: Boolean = false,
     val refreshMs: Long = 3_000,
     val indexIntervalMs: Long = 10_000,
 )
@@ -63,6 +65,14 @@ class Node(
     @Volatile
     var name: String = config.name
         private set
+
+    @Volatile
+    var nameGenerated: Boolean = config.nameGenerated
+        private set
+
+    /** Gets the new name when a made-up name gave way to another peer's (for the app to remember). */
+    @Volatile
+    var onRenamed: ((String) -> Unit)? = null
     val auth = Authenticator(config.passphraseKey, peerId)
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(2, TimeUnit.SECONDS)
@@ -71,7 +81,7 @@ class Node(
         .proxy(Proxy.NO_PROXY) // never route LAN traffic through a configured HTTP proxy
         .build()
     val indexer = Indexer(shareTree, File(config.stateDir, "hash_cache.json"), config.indexIntervalMs)
-    val peers = PeerTable(peerId, auth, config.refreshMs, http)
+    val peers = PeerTable(peerId, auth, config.refreshMs, http).also { it.afterPoll = ::checkName }
     val downloads = DownloadManager(
         downloadFolder, auth, peers,
         http.newBuilder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build(),
@@ -250,6 +260,7 @@ class Node(
             put("swarm", buildJsonArray { for (id in downloads.swarmFiles()) add(id) })
             put("play", 1) // serves GET /api/games: plays head-to-head games (LightningLAN 1.2+)
             put("games", buildJsonArray { for (kind in GAME_TITLES.keys) add(kind) }) // which ones
+            put("name_auto", nameGenerated) // made-up names give way when two peers share one
         }.toString().toByteArray(Charsets.UTF_8)
         val etag = "\"" + sha256Hex(body).take(32) + "\""
         filesCache = Triple(key, body, etag)
@@ -277,11 +288,28 @@ class Node(
 
     // ----- settings ----------------------------------------------------------------------------
 
-    fun setName(name: String) {
+    /** [generated]: made up by the app (it may change by itself), not picked by the person. */
+    fun setName(name: String, generated: Boolean = false) {
         this.name = name
+        nameGenerated = generated
         filesCache = null
         commonCache = null
         reannounce()
+    }
+
+    /**
+     * A made-up name that another peer already has is swapped for a free one. When both names were
+     * made up, the peer with the larger ID gives way; a picked name (or one from before 1.3, which
+     * doesn't say) never changes, so this one does.
+     */
+    internal fun checkName() {
+        if (!nameGenerated || !online) return
+        val mine = name.lowercase()
+        val clash = peers.online().firstOrNull { it.name.lowercase() == mine && (!it.nameAuto || peerId > it.peerId) } ?: return
+        val fresh = randomName(listOf(name) + peers.known().map { it.name })
+        CoreLog.i(TAG, "another peer is also called ${clash.name}, so this one is $fresh now")
+        setName(fresh, generated = true)
+        onRenamed?.invoke(fresh)
     }
 
     /** A passphrase's key from [deriveKey], or null to turn the passphrase off. */

@@ -13,6 +13,8 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from typing import Callable
+
 import httpx
 
 from .auth import REASONS, Authenticator
@@ -65,6 +67,7 @@ class Peer:
     swarm_files: frozenset[str] = frozenset()  # files it can pass pieces of (downloading or downloaded)
     play: bool = False  # plays head-to-head games (LightningLAN 1.2+)
     games: frozenset[str] | None = None  # which ones (None: the first three, from before it said)
+    name_auto: bool = False  # its name was made up by LightningLAN (1.3+), so it gives way when names clash
 
     @property
     def online(self) -> bool:
@@ -141,6 +144,7 @@ class PeerTable:
         self._wake: asyncio.Event | None = None
         self._task: asyncio.Task | None = None
         self._client: httpx.AsyncClient | None = None
+        self.on_polled: Callable[[], None] | None = None  # called after each round of polls
 
     # ----- lifecycle --------------------------------------------------------------------
 
@@ -180,6 +184,10 @@ class PeerTable:
 
     def ignored(self) -> list[Peer]:
         return [p for p in list(self._peers.values()) if p.state == IGNORED]
+
+    def known(self) -> list[Peer]:
+        """Every peer found, online or not."""
+        return list(self._peers.values())
 
     # ----- discovery callbacks ----------------------------------------------------------
 
@@ -235,6 +243,11 @@ class PeerTable:
             due = [p for p in list(self._peers.values()) if p.next_poll <= now]
             if due:
                 await asyncio.gather(*(self._poll(p) for p in due), return_exceptions=True)
+                if self.on_polled is not None:
+                    try:
+                        self.on_polled()
+                    except Exception:
+                        log.exception("after-poll check failed")
             self._wake.clear()
             next_due = min((p.next_poll for p in self._peers.values()), default=now + self.refresh_interval)
             delay = min(max(next_due - time.monotonic(), 0.05), self.refresh_interval)
@@ -285,8 +298,10 @@ class PeerTable:
         peer.play = payload.get("play") == 1
         games = payload.get("games")
         peer.games = frozenset(g for g in games[:50] if isinstance(g, str)) if isinstance(games, list) else None
+        peer.name_auto = payload.get("name_auto") is True
         if name and name != peer.name:
             peer.name = name
+            self.version += 1  # ThunderCLOUD shows its files under the new name
         if files != peer.files or not peer.online:
             self.version += 1
         peer.files, peer.indexing, peer.etag = files, pending, etag

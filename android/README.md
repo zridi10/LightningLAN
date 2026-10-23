@@ -58,10 +58,15 @@ skipped when no such Python environment exists.
 
 ## How it works on the phone
 
-- **Folders.** On first start you pick one folder (for example Download/LightningLAN); the app
-  makes `Shared` and `Downloads` folders inside it, like the desktop app's defaults. Partial
-  downloads live in `Downloads/.lightninglan-partial` and are moved into place once verified.
-  Settings can point either folder anywhere else.
+- **Folders.** Nothing to choose on first start, like the desktop app: the app makes
+  `Download/LightningLAN/Shared` and `Download/LightningLAN/Downloads` on the phone's storage and
+  starts sharing (`LocalFolders.kt`, plain file paths). Android 11 and later allow that without
+  asking; Android 8 to 10 ask for the storage permission first, and without it the folders go in
+  the app's own storage. Partial downloads live in `Downloads/.lightninglan-partial` and are moved
+  into place once verified; finished files show up in the Files app and galleries. Android only
+  lets the app see the files it put in its folders itself (downloads, and files sent to it from
+  other apps' Share menus), not ones a file manager copies in: share those with **Share files**,
+  or pick a different folder in Settings (through Android's folder chooser, which gives full access).
 - **Share files** shares picked files from where they are (no copy); **Unshare** stops that.
   Files sent to LightningLAN from other apps' Share menus are copied into the Shared folder.
 - **In the background**, a foreground service with a notification keeps sharing, holding a wake
@@ -72,7 +77,8 @@ skipped when no such Python environment exists.
   computers and other phones alike (`core/.../Games.kt` and `Play.kt`, the same rules and records
   as `lightninglan/games.py` and `play.py`), and the solo Falling blocks game (`ui/BlocksGame.kt`).
   Invitations arriving while the app is closed show as notifications.
-- **Themes** are the desktop app's: automatic, light, dark, and the animated Synthwave, Bliss
-  and Deep Sea scenes (drawn in `ui/Scenes.kt` after `static/themes`). The theme button in the
-  title bar cycles through them; Settings lists them all. With animations turned off in
-  Android's settings, the scenes stand still.
+- **Themes** are the desktop app's: the animated Synthwave (the default), Bliss and Deep Sea
+  scenes (drawn in `ui/Scenes.kt` after `static/themes`), and plain light and dark, picked in
+  Settings. With animations turned off in Android's settings, the scenes stand still.
+- **Names**: a made-up name that another device also has is swapped for a free one by itself
+  (the same rule as the desktop app); a name picked in Settings never changes.

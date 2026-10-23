@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The folders FileProvider may hand files out of (only files this app can read anyway). -->
+<paths>
+    <external-path name="storage" path="." />
+    <external-files-path name="app" path="." />
+    <files-path name="private" path="." />
+</paths>

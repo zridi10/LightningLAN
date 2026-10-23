@@ -179,7 +179,9 @@ button { font: inherit; color: inherit; }
 .cloud-icon { width: 22px; height: 22px; flex: none; }
 .cloud-icon .cloud { fill: var(--muted); }
 .cloud-icon .bolt { fill: var(--bolt); }
+.section-head .sharer { margin-left: auto; }
 .section-head .filter { margin-left: auto; }
+.section-head .sharer:not([hidden]) + .filter { margin-left: 0; }
 .filter { width: 220px; max-width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
           background: var(--surface); color: var(--text); font: inherit; }
 .filter:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -229,14 +231,16 @@ button { font: inherit; color: inherit; }
 
 /* ----- downloads -------------------------------------------------------------------------- */
 
-.downloads { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+/* The list scrolls by itself instead of making the whole page longer. */
+.downloads { list-style: none; margin: 0; padding: 0 4px 0 0; display: flex; flex-direction: column; gap: 10px;
+             max-height: min(58vh, 520px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .dl { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--surface);
       display: flex; gap: 10px; align-items: flex-start; }
 .dl-body { flex: 1; min-width: 0; }
 .dl-top { display: flex; gap: 8px; align-items: baseline; }
-.dl-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.dl-name { font-weight: 600; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 .dl-pct { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.dl-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.dl-meta { font-size: 12px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
 .dl-error { font-size: 12.5px; color: var(--danger); margin-top: 5px; }
 .dl-note { font-size: 12.5px; color: var(--warn); margin-top: 5px; }
 .dl-actions { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
@@ -361,6 +365,8 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .phone-send .drop-title, .phone-send .drop-sub { display: block; }
 .phone-tools { display: flex; gap: 8px; }
 .phone-tools .filter { flex: 1; width: auto; min-width: 0; }
+.phone-files + .sharer, .phone-tools + .sharer { width: 100%; margin-top: 8px; }
+.phone-footer { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 18px; }
 .phone-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .pf { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--surface);
       border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -683,7 +689,7 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .sw-grid { position: absolute; left: -150%; right: -150%; top: -70px; height: 1200px; transform-origin: 50% 70px;
            background-image: linear-gradient(rgba(255, 63, 191, 0.85) 2px, transparent 2px),
                              linear-gradient(90deg, rgba(54, 249, 198, 0.55) 2px, transparent 2px);
-           background-size: 70px 70px; animation: sw-roll 1.1s linear infinite; }
+           background-size: 70px 70px; transform: rotateX(68deg); animation: sw-roll 1.1s linear infinite; }
 @keyframes sw-roll { from { transform: rotateX(68deg) translateY(0); } to { transform: rotateX(68deg) translateY(70px); } }
 :root[data-theme="synthwave"] .brand-name {
   background: linear-gradient(90deg, #ff3fbf, #ffe45c 55%, #36f9c6); -webkit-background-clip: text; background-clip: text;

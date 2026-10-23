@@ -1,6 +1,5 @@
 package lightninglan.app.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -18,26 +17,23 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.unit.dp
 
-/** The desktop app's themes (static/style.css); the theme button cycles through them in this order. */
+/** The desktop app's themes (static/style.css), in the order Settings lists them. Synthwave is the default. */
 enum class AppTheme(val key: String, val label: String) {
-    AUTO("auto", "automatic"),
-    LIGHT("light", "light"),
-    DARK("dark", "dark"),
     SYNTHWAVE("synthwave", "Synthwave"),
     BLISS("bliss", "Bliss"),
-    DEEPSEA("deepsea", "Deep Sea");
-
-    fun next(): AppTheme = entries[(ordinal + 1) % entries.size]
+    DEEPSEA("deepsea", "Deep Sea"),
+    LIGHT("light", "Light"),
+    DARK("dark", "Dark");
 
     companion object {
-        fun from(key: String?): AppTheme = entries.firstOrNull { it.key == key } ?: AUTO
+        fun from(key: String?): AppTheme = entries.firstOrNull { it.key == key } ?: SYNTHWAVE
     }
 }
 
 /** What a theme changes beyond Material's colours. */
 @Immutable
 data class AppStyle(
-    val theme: AppTheme, // never AUTO: that is resolved to LIGHT or DARK
+    val theme: AppTheme,
     val dark: Boolean,
     /** A colourful theme: its animated scene is drawn behind the screens, which turn see-through. */
     val scene: Boolean,
@@ -214,10 +210,7 @@ private val deepSeaStyle = AppStyle(
     ok = Color(0xFF5EF0B4),
 )
 
-/** The theme's style; AUTO follows the phone's dark mode setting. */
-@Composable
 fun styleFor(theme: AppTheme): AppStyle = when (theme) {
-    AppTheme.AUTO -> if (isSystemInDarkTheme()) darkStyle else lightStyle
     AppTheme.LIGHT -> lightStyle
     AppTheme.DARK -> darkStyle
     AppTheme.SYNTHWAVE -> synthwaveStyle

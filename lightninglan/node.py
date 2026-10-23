@@ -19,6 +19,7 @@ from .desktop import folder_picker_available
 from .discovery import Discovery
 from .indexer import Indexer
 from .logs import log_dir
+from .names import random_name
 from .netutil import lan_addresses
 from .peers import PeerTable
 from .play import TITLES as GAME_TITLES, Arcade
@@ -48,6 +49,7 @@ class Node:
             interval=max(1.0, min(5.0, settings.refresh_interval * 2)),
         )
         self.peers = PeerTable(settings.peer_id, self.auth, settings.refresh_interval)
+        self.peers.on_polled = self._check_name
         self.downloads = DownloadManager(settings.downloads_dir, self.auth, self.peers)
         self.arcade = Arcade(settings.peer_id, lambda: self.settings.name, self.auth, self.peers,
                              settings.refresh_interval)
@@ -77,6 +79,7 @@ class Node:
         self.phones = 0  # phone pages open right now
         self._phone_key_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
+        self._renaming = False
 
     @property
     def peer_id(self) -> str:
@@ -257,6 +260,7 @@ class Node:
                 "swarm": self.downloads.swarm_files(),
                 "play": 1,  # serves GET /api/games: can play head-to-head games (LightningLAN 1.2+)
                 "games": list(GAME_TITLES),  # which ones
+                "name_auto": self.settings.name_generated,  # made-up names give way when two peers share one
             },
             separators=(",", ":"),
         ).encode("utf-8")
@@ -368,6 +372,8 @@ class Node:
             return []
 
         stored = {k: (str(v) if isinstance(v, Path) else v) for k, v in changes.items()}
+        if "name" in changes:
+            stored["name_generated"] = False  # picked by the person: kept even if another peer has it too
         try:
             await asyncio.to_thread(update_config_file, s.config_path, stored)
         except ConfigError as exc:
@@ -375,6 +381,7 @@ class Node:
 
         if "name" in changes:
             s.name = changes["name"]  # type: ignore[assignment]
+            s.name_generated = False
             self._files_cache = self._common_cache = None
         if "share_dir" in changes:
             s.share_dir = changes["share_dir"]  # type: ignore[assignment]
@@ -392,6 +399,41 @@ class Node:
             await self.discovery.update(name=s.name, auth_enabled=self.auth.enabled)
         log.info("settings changed: %s", ", ".join(sorted(changes)))
         return sorted(changes)
+
+
+    # ----- unique names ------------------------------------------------------------------------
+
+    def _check_name(self) -> None:
+        """A made-up name that another peer already has is swapped for a free one.
+
+        When both names were made up, the peer with the larger ID gives way; a name someone picked
+        (or one from LightningLAN before 1.3, which doesn't say) never changes, so this one does.
+        """
+        s = self.settings
+        if not s.name_generated or self._renaming or self._closing or not self.online:
+            return
+        mine = s.name.casefold()
+        for peer in self.peers.online():
+            if peer.name.casefold() == mine and (not peer.name_auto or self.peer_id > peer.peer_id):
+                self._renaming = True
+                self._spawn(self._take_free_name(peer.name))
+                return
+
+    async def _take_free_name(self, clash: str) -> None:
+        s = self.settings
+        try:
+            new = random_name([s.name] + [p.name for p in self.peers.known()])
+            if s.config_path is not None:
+                await asyncio.to_thread(update_config_file, s.config_path, {"name": new, "name_generated": True})
+            s.name = new
+            self._files_cache = self._common_cache = None
+            if self.discovery is not None:
+                await self.discovery.update(name=new, auth_enabled=self.auth.enabled)
+            log.info("another peer is also called %s, so this one is %s now", clash, new)
+        except ConfigError as exc:
+            log.warning("could not change the name: %s", exc)
+        finally:
+            self._renaming = False
 
 
 def _checked_folder(value: str, label: str) -> Path:

@@ -115,10 +115,29 @@ class PlayTest {
     }
 
     @Test
+    fun `back-to-back games take turns going first, and a first game picks at random`() {
+        val alice = arcade(a, "Alice", b, "Bob")
+        val bob = arcade(b, "Bob", a, "Alice")
+        val id = alice.invite(b, TICTACTOE, first = true).id
+        sync(alice, a, bob, b)
+        bob.answer(id, true)
+        sync(alice, a, bob, b)
+        val next = alice.invite(b, ULTIMATE) // any game, from either side: the other one starts
+        assertEquals(1, next.seat)
+        sync(alice, a, bob, b)
+        bob.answer(next.id, true)
+        sync(alice, a, bob, b)
+        assertEquals(1, bob.invite(a, RPS).seat) // Bob started the last one
+        assertEquals(0, alice.invite(b, TICTACTOE).seat) // that invitation wasn't accepted: it doesn't count
+        val seats = (1..40).map { arcade(a, "Alice", b, "Bob").invite(b, TICTACTOE).seat }.toSet()
+        assertEquals(setOf(0, 1), seats)
+    }
+
+    @Test
     fun `two players invite, play and finish`() {
         val alice = arcade(a, "Alice", b, "Bob")
         val bob = arcade(b, "Bob", a, "Alice")
-        val id = alice.invite(b, TICTACTOE).id
+        val id = alice.invite(b, TICTACTOE, first = true).id
         sync(alice, a, bob, b)
         assertEquals("Alice", bob.view().invites.single().from.name)
         assertNotNull(bob.answer(id, true))
@@ -137,7 +156,7 @@ class PlayTest {
     fun `rock paper scissors stays sealed until both lock in`() {
         val alice = arcade(a, "Alice", b, "Bob")
         val bob = arcade(b, "Bob", a, "Alice")
-        val id = alice.invite(b, RPS, bestOf = 1).id
+        val id = alice.invite(b, RPS, bestOf = 1, first = true).id
         sync(alice, a, bob, b)
         bob.answer(id, true)
         sync(alice, a, bob, b)

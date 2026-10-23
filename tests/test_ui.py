@@ -49,7 +49,7 @@ def test_the_computer_page_has_the_phone_dialog():
 
 def test_page_contains_the_required_parts():
     for element_id in ["self-name", "peer-count", "drop-zone", "file-input", "files", "file-rows", "filter",
-                       "downloads", "peers", "theme-toggle", "toasts"]:
+                       "downloads", "peers", "set-theme", "sharer", "toasts"]:
         assert f'id="{element_id}"' in INDEX_HTML
     for column in ["name", "size", "owners", "mtime"]:
         assert f'data-sort="{column}"' in INDEX_HTML
@@ -58,16 +58,24 @@ def test_page_contains_the_required_parts():
 CSS = (STATIC_DIR / "style.css").read_text(encoding="utf-8")
 
 
-def test_every_theme_in_the_cycle_has_styles_and_its_scene_exists():
+def test_every_theme_has_styles_and_its_scene_exists():
     themes = re.search(r"var THEMES = \[([^\]]*)\]", APP_JS).group(1)
     names = re.findall(r"'([\w-]+)'", themes)
-    assert names[:3] == ["auto", "light", "dark"] and len(names) == 6
-    for theme in names[2:]:  # light is the default colours
-        assert f':root[data-theme="{theme}"]' in CSS, f"no colours for the {theme} theme"
+    assert names == ["synthwave", "bliss", "deepsea", "light", "dark"]  # Synthwave is the default; no "automatic"
+    assert '<html lang="en" data-theme="synthwave">' in INDEX_HTML  # from the first paint, before app.js runs
+    for theme in names:
+        if theme != "light":  # light is the base colours
+            assert f':root[data-theme="{theme}"]' in CSS, f"no colours for the {theme} theme"
         assert f"{theme}:" in APP_JS.split("THEME_NAMES", 1)[1].split("};", 1)[0], f"no display name for {theme}"
-    for theme in names[3:]:
+    for theme in names[:3]:
         assert f'class="scene scene-{theme}"' in INDEX_HTML
         assert f".scene-{theme} {{" in CSS
+
+
+def test_the_theme_is_picked_in_settings_not_in_the_header():
+    assert "theme-toggle" not in INDEX_HTML and "cycleTheme" not in APP_JS
+    settings = INDEX_HTML.split('id="settings"', 1)[1].split("</dialog>", 1)[0]
+    assert 'id="set-theme"' in settings
 
 
 def test_theme_artwork_exists_and_is_safe_as_an_image():

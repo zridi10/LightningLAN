@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            var theme by remember { mutableStateOf(AppTheme.from(sharing.settings.theme)) }
+            var theme by remember { mutableStateOf(AppTheme.from(sharing.settings.theme)) } // Synthwave until another is picked
             val style = styleFor(theme)
             // Light status bar icons on dark themes and on Bliss's blue title bar.
             val lightIcons = style.dark || style.theme == AppTheme.BLISS
