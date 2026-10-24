@@ -15,6 +15,10 @@
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="33" />
+    <!-- The NFC tap (NfcTag.kt): this phone acts as a tag holding its join link while the tap screen shows. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -54,6 +58,30 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
+            <!-- Another phone's join link (Join.kt): its QR code, verified against
+                 lightninglan.party/.well-known/assetlinks.json so the camera opens it here... -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="lightninglan.party" />
+                <data android:path="/join/" />
+                <data android:path="/join" />
+            </intent-filter>
+            <!-- ...its NFC tap... -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="https" android:host="lightninglan.party" android:path="/join/" />
+            </intent-filter>
+            <!-- ...and the website's join page's "Open in LightningLAN" button. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="lightninglan" android:host="join" />
+            </intent-filter>
         </activity>
 
         <!-- "Open" for files in the app's own folders (Download/LightningLAN). -->
@@ -66,6 +94,20 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Switched on only while the tap screen shows (NfcTag.kt). -->
+        <service
+            android:name=".NfcTagService"
+            android:enabled="false"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/nfc_tag" />
+        </service>
 
         <service
             android:name=".SharingService"

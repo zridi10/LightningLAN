@@ -3,6 +3,7 @@
 package lightninglan.app.ui
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -34,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,7 +64,68 @@ import lightninglan.core.qrRows
 import lightninglan.core.wifiQrText
 
 /** Why the hotspot can't start yet: something the person has to allow or switch on first. */
-private enum class HotspotBlock { PERMISSION, LOCATION }
+internal enum class HotspotBlock { PERMISSION, LOCATION }
+
+/** Starts this phone's hotspot, asking first for what Android wants (here and in the join menus, ConnectDialogs.kt). */
+internal class HotspotStarter(private val blockedState: State<HotspotBlock?>, val start: () -> Unit) {
+    /** What stopped the last start, if anything. */
+    val blocked: HotspotBlock? get() = blockedState.value
+}
+
+@Composable
+internal fun rememberHotspotStarter(sharing: Sharing): HotspotStarter {
+    val context = LocalContext.current
+    val blocked = remember { mutableStateOf<HotspotBlock?>(null) }
+    fun startUnlessLocationOff() {
+        if (locationOffForHotspot(context)) {
+            blocked.value = HotspotBlock.LOCATION
+        } else {
+            blocked.value = null
+            sharing.startHotspot()
+        }
+    }
+    val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (hotspotPermissionsMissing(context)) blocked.value = HotspotBlock.PERMISSION else startUnlessLocationOff()
+    }
+    return HotspotStarter(blocked) {
+        if (hotspotPermissionsMissing(context)) askPermission.launch(hotspotPermissions()) else startUnlessLocationOff()
+    }
+}
+
+/** What to allow or switch on before the hotspot can start, and the settings screen for it. */
+@Composable
+internal fun HotspotBlockMessage(blocked: HotspotBlock?, sharing: Sharing) {
+    val context = LocalContext.current
+    val error = MaterialTheme.colorScheme.error
+    when (blocked) {
+        HotspotBlock.PERMISSION -> {
+            Text(
+                if (Build.VERSION.SDK_INT >= 33) "Android needs you to allow \"Nearby devices\" for LightningLAN to start a hotspot."
+                else "Android needs you to allow location for LightningLAN to start a hotspot. LightningLAN never asks where the phone is.",
+                color = error,
+            )
+            TextButton(onClick = {
+                openScreen(context, sharing, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+            }) { Text("App settings") }
+        }
+        HotspotBlock.LOCATION -> {
+            Text(
+                "On this Android version, Location has to be switched on to start a hotspot. LightningLAN never asks " +
+                    "where the phone is.",
+                color = error,
+            )
+            TextButton(onClick = { openScreen(context, sharing, Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }) { Text("Location settings") }
+        }
+        null -> Unit
+    }
+}
+
+/** Opens one of Android's settings screens. */
+internal fun openScreen(context: Context, sharing: Sharing, intent: Intent) = try {
+    context.startActivity(intent)
+} catch (e: ActivityNotFoundException) {
+    sharing.toast("This phone has no settings screen for that.")
+}
 
 /**
  * "Use LightningLAN on another phone": the QR code that opens the phone page (the desktop app's
@@ -72,12 +135,11 @@ private enum class HotspotBlock { PERMISSION, LOCATION }
  */
 @Composable
 internal fun PhonesDialog(sharing: Sharing, snap: UiSnapshot, onDismiss: () -> Unit) {
-    val context = LocalContext.current
     var links by remember { mutableStateOf<List<PhoneLink>?>(null) }
     var chosen by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf(false) }
     var step by remember { mutableIntStateOf(1) } // with the hotspot: 1 join its Wi-Fi, 2 open LightningLAN
-    var blocked by remember { mutableStateOf<HotspotBlock?>(null) }
+    val starter = rememberHotspotStarter(sharing)
     val phones = snap.status?.phones ?: 0
     var phonesSeen by remember { mutableIntStateOf(phones) }
     val hotspot = snap.hotspot
@@ -87,26 +149,6 @@ internal fun PhonesDialog(sharing: Sharing, snap: UiSnapshot, onDismiss: () -> U
         phonesSeen = phones
     }
     LaunchedEffect(hotspot is HotspotState.On) { step = 1 }
-
-    fun startUnlessLocationOff() {
-        if (locationOffForHotspot(context)) {
-            blocked = HotspotBlock.LOCATION
-        } else {
-            blocked = null
-            sharing.startHotspot()
-        }
-    }
-    val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (hotspotPermissionsMissing(context)) blocked = HotspotBlock.PERMISSION else startUnlessLocationOff()
-    }
-    fun makeHotspot() {
-        if (hotspotPermissionsMissing(context)) askPermission.launch(hotspotPermissions()) else startUnlessLocationOff()
-    }
-    fun open(intent: Intent) = try {
-        context.startActivity(intent)
-    } catch (e: ActivityNotFoundException) {
-        sharing.toast("This phone has no settings screen for that.")
-    }
 
     val all = links ?: emptyList()
     // With the hotspot, only its own address will do (none until it has one); otherwise the one picked, or the first.
@@ -201,32 +243,16 @@ internal fun PhonesDialog(sharing: Sharing, snap: UiSnapshot, onDismiss: () -> U
                             color = muted,
                         )
                         (hotspot as? HotspotState.Failed)?.let { Text(it.message, color = error) }
-                        when (blocked) {
-                            HotspotBlock.PERMISSION -> {
-                                Text(
-                                    if (Build.VERSION.SDK_INT >= 33) "Android needs you to allow \"Nearby devices\" for LightningLAN to start a hotspot."
-                                    else "Android needs you to allow location for LightningLAN to start a hotspot. LightningLAN never asks where the phone is.",
-                                    color = error,
-                                )
-                                TextButton(onClick = {
-                                    open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
-                                }) { Text("App settings") }
-                            }
-                            HotspotBlock.LOCATION -> {
-                                Text(
-                                    "On this Android version, Location has to be switched on to start a hotspot. LightningLAN never asks " +
-                                        "where the phone is.",
-                                    color = error,
-                                )
-                                TextButton(onClick = { open(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }) { Text("Location settings") }
-                            }
-                            null -> Unit
-                        }
+                        HotspotBlockMessage(starter.blocked, sharing)
                         if (link == null) {
-                            ThemedButton(onClick = ::makeHotspot) { Text("Make a hotspot") }
+                            ThemedButton(onClick = starter.start) { Text("Make a hotspot") }
                         } else {
-                            OutlinedButton(onClick = ::makeHotspot) { Text("Make a hotspot") }
+                            OutlinedButton(onClick = starter.start) { Text("Make a hotspot") }
                         }
+                        Text(
+                            "The other phone has LightningLAN too? ⋮ at the top connects the two with one scan, or a tap.",
+                            color = muted, style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
                 if (link != null) {
@@ -258,7 +284,7 @@ internal fun PhonesDialog(sharing: Sharing, snap: UiSnapshot, onDismiss: () -> U
 }
 
 @Composable
-private fun CenteredQr(rows: List<String>, description: String) {
+internal fun CenteredQr(rows: List<String>, description: String) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         QrCode(rows, description, Modifier.widthIn(max = 260.dp).fillMaxWidth())
     }

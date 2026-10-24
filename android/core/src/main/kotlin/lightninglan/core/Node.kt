@@ -6,7 +6,10 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.ConnectionPool
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
 import java.math.BigDecimal
@@ -390,6 +393,42 @@ class Node(
         val n = openPhones.decrementAndGet()
         phonesVersion++
         CoreLog.i(TAG, "a phone disconnected ($n connected)")
+    }
+
+    // ----- a peer whose hotspot this phone joined (Join.kt) ------------------------------------------
+
+    /**
+     * Meets the peer a join link points at: polls it, and asks it to poll this one back (the two
+     * can't find each other on its hotspot by themselves). Null when it said yes; otherwise why
+     * not. It may just not be reachable yet, so try again.
+     */
+    fun introduce(link: JoinLink): String? {
+        if (!online) return "This phone has stopped sharing."
+        peers.meet(link.peerId, link.name, link.address, link.port)
+        val path = "/api/introduce"
+        val signed = auth.signRequest("POST", path)
+        val payload = buildJsonObject {
+            put("peer_id", peerId)
+            put("name", name)
+            put("port", port)
+        }.toString()
+        val builder = Request.Builder().url("http://${link.address}:${link.port}$path")
+            .post(payload.toRequestBody("application/json".toMediaType()))
+        for ((k, v) in signed) builder.header(k, v)
+        return try {
+            http.newCall(builder.build()).execute().use { resp ->
+                when {
+                    resp.code == 401 || resp.code == 403 -> authReason(readLimited(resp, 64 * 1024), auth.enabled)
+                    !auth.verifyResponse(signed[TOKEN_HEADER], resp.header(PROOF_HEADER)) -> AUTH_REASONS.getValue("no_proof")
+                    resp.code == 503 -> "${link.name} has stopped sharing."
+                    resp.code == 404 -> "${link.name} has an older LightningLAN."
+                    resp.code != 200 -> "${link.name} said no (HTTP ${resp.code})."
+                    else -> null
+                }
+            }
+        } catch (e: IOException) {
+            describeNetworkError(e)
+        }
     }
 
     /** Where files sent from the phone page go: the shared folder, if it can take them. */

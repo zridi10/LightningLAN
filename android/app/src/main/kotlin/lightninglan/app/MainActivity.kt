@@ -3,6 +3,7 @@ package lightninglan.app
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
+import android.nfc.NfcAdapter
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -18,6 +19,7 @@ import lightninglan.app.ui.App
 import lightninglan.app.ui.AppTheme
 import lightninglan.app.ui.LightningTheme
 import lightninglan.app.ui.styleFor
+import lightninglan.core.JoinLink
 
 class MainActivity : ComponentActivity() {
     private val sharing: Sharing get() = (application as LightningApp).sharing
@@ -41,6 +43,7 @@ class MainActivity : ComponentActivity() {
         }
         if (savedInstanceState == null) {
             receiveShared(intent)
+            receiveJoinLink(intent)
             intent?.getStringExtra(EXTRA_TAB)?.let { tabRequest.value = it }
         }
     }
@@ -48,6 +51,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         receiveShared(intent)
+        receiveJoinLink(intent)
         intent.getStringExtra(EXTRA_TAB)?.let { tabRequest.value = it }
     }
 
@@ -60,6 +64,15 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         sharing.appVisible = false
         super.onStop()
+    }
+
+    /** Another phone's join link, from its QR code or an NFC tap: join its hotspot. */
+    private fun receiveJoinLink(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW && intent?.action != NfcAdapter.ACTION_NDEF_DISCOVERED) return
+        val uri = intent.dataString ?: return
+        setIntent(Intent(this, MainActivity::class.java)) // not again after a rotation
+        val link = JoinLink.parse(uri)
+        if (link == null) sharing.toast("This code is for another version of LightningLAN.") else sharing.join(link)
     }
 
     /** "Share" from another app: the files are copied into the shared folder. */

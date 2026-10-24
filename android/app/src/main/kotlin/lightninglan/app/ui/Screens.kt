@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -40,6 +41,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -50,6 +52,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -74,6 +78,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -88,11 +93,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -103,6 +110,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import lightninglan.app.BuildConfig
+import lightninglan.app.JoinState
+import lightninglan.app.NfcTag
 import lightninglan.app.Sharing
 import lightninglan.app.UiSnapshot
 import lightninglan.app.storagePermissionNeeded
@@ -137,8 +146,11 @@ fun App(sharing: Sharing, theme: AppTheme, onTheme: (AppTheme) -> Unit, tabReque
     var screen by rememberSaveable { mutableStateOf("main") }
     val style = LocalAppStyle.current
     val tutorial = remember { Tutorial() }
-    LaunchedEffect(snap.setupDone) {
-        if (snap.setupDone && sharing.settings.tutorialDue) { // the first run: once, then only from Settings
+    // Joining another phone's hotspot (its join link opened the app): shown until closed, once per join.
+    var joinHiddenFor by rememberSaveable { mutableIntStateOf(0) }
+    val join = (snap.join as? JoinState.Active)?.takeIf { snap.setupDone && it.session != joinHiddenFor }
+    LaunchedEffect(snap.setupDone, join == null) {
+        if (snap.setupDone && join == null && sharing.settings.tutorialDue) { // the first run: once, then only from Settings
             delay(700) // the main screen first
             sharing.settings.tutorialDue = false
             screen = "main"
@@ -161,6 +173,7 @@ fun App(sharing: Sharing, theme: AppTheme, onTheme: (AppTheme) -> Unit, tabReque
             }
             if (snap.setupDone && screen == "main") TutorialOverlay(tutorial) { tabRequest.value = it }
         }
+        if (join != null) JoinDialog(sharing, join) { joinHiddenFor = join.session }
     }
 }
 
@@ -303,6 +316,10 @@ private fun MainScreen(
     var sharer by rememberSaveable { mutableStateOf<String?>(null) } // a peer ID: only the files it shares
     var showPeers by remember { mutableStateOf(false) }
     var showPhones by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showConnectQr by remember { mutableStateOf(false) }
+    var showConnectTap by remember { mutableStateOf(false) }
+    val canTap = remember { NfcTag.supported(context) }
     val shareFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) sharing.shareInPlace(uris)
     }
@@ -330,17 +347,7 @@ private fun MainScreen(
     Screen(
         topBar = {
             AppTopBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Logo(28)
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            "LightningLAN",
-                            fontWeight = FontWeight.SemiBold,
-                            style = style.brand?.let { MaterialTheme.typography.titleLarge.copy(brush = it) } ?: MaterialTheme.typography.titleLarge,
-                        )
-                    }
-                },
+                title = { BrandTitle() },
                 actions = {
                     Box(Modifier.tutorialTarget("devices")) { PeersPill(snap.peers.size, online) { showPeers = true } }
                     val phones = snap.status?.phones ?: 0
@@ -354,6 +361,28 @@ private fun MainScreen(
                     }
                     IconButton(onClick = onSettings, modifier = Modifier.tutorialTarget("settings")) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
+                    // Phones that both have the app, with no Wi-Fi in common (ConnectDialogs.kt): kept out of the way here.
+                    Box(Modifier.tutorialTarget("more")) {
+                        IconButton(onClick = { showMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More ways to connect") }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Connect a LightningLAN phone (QR code)") },
+                                onClick = {
+                                    showMenu = false
+                                    showConnectQr = true
+                                },
+                            )
+                            if (canTap) {
+                                DropdownMenuItem(
+                                    text = { Text("Connect a LightningLAN phone (NFC tap)") },
+                                    onClick = {
+                                        showMenu = false
+                                        showConnectTap = true
+                                    },
+                                )
+                            }
+                        }
                     }
                 },
             )
@@ -468,6 +497,30 @@ private fun MainScreen(
     }
     if (showPeers) PeersDialog(snap) { showPeers = false }
     if (showPhones) PhonesDialog(sharing, snap) { showPhones = false }
+    if (showConnectQr) ConnectQrDialog(sharing, snap) { showConnectQr = false }
+    if (showConnectTap) ConnectTapDialog(sharing, snap) { showConnectTap = false }
+}
+
+/** "LightningLAN" next to the logo, as big as the top bar has room for (just the logo on a narrow phone). */
+@Composable
+private fun BrandTitle() {
+    val style = LocalAppStyle.current
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val typography = MaterialTheme.typography
+    BoxWithConstraints {
+        val room = maxWidth - 38.dp // the logo and the space after it
+        val fits = listOf(typography.titleLarge, typography.titleMedium, typography.titleSmall)
+            .map { it.copy(fontWeight = FontWeight.SemiBold) }
+            .firstOrNull { with(density) { measurer.measure("LightningLAN", it).size.width.toDp() } <= room }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Logo(28)
+            if (fits != null) {
+                Spacer(Modifier.width(10.dp))
+                Text("LightningLAN", maxLines = 1, softWrap = false, style = style.brand?.let { fits.copy(brush = it) } ?: fits)
+            }
+        }
+    }
 }
 
 @Composable
@@ -499,7 +552,22 @@ private fun StatusCard(sharing: Sharing, snap: UiSnapshot) {
                     }
                 }
             }
-            if (!snap.onWifi) {
+            (snap.join as? JoinState.Active)?.let { join ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        when (join) {
+                            is JoinState.Joined -> "On ${join.link.name}'s hotspot."
+                            is JoinState.Joining -> "Joining ${join.link.name}'s hotspot…"
+                            is JoinState.Failed -> "Couldn't join ${join.link.name}'s hotspot."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (join is JoinState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = sharing::leaveHotspot) { Text(if (join is JoinState.Failed) "Close" else "Leave") }
+                }
+            }
+            if (!snap.onWifi && snap.join !is JoinState.Active) {
                 Text(
                     "Not on Wi-Fi. Connect to the same Wi-Fi as your computers.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
@@ -548,6 +616,10 @@ private fun PeersDialog(snap: UiSnapshot, onDismiss: () -> Unit) {
                     Text(
                         "None found yet. Make sure LightningLAN is running on your computer, that both are on the same Wi-Fi " +
                             "(not a guest network), and that the computer's firewall allows LightningLAN on private networks.",
+                    )
+                    Text(
+                        "Another phone with LightningLAN, and no Wi-Fi in common? ⋮ at the top connects the two.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 for (p in snap.peers) {

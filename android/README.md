@@ -98,8 +98,23 @@ skipped when no such Python environment exists.
   Location switched on before that. Android only starts one for the app on screen; the sharing
   service keeps the process, and so the hotspot, running until **Stop hotspot**, **Stop** or the app
   goes away. Most phones can't be on a Wi-Fi and host at once, so they leave their Wi-Fi meanwhile.
-  Other phones with the app and computers can join it too, but nothing yet helps them find each
-  other there if mDNS doesn't get through; the phone page always works.
+  Computers can join it too, but nothing helps them find the phone there if mDNS doesn't get
+  through; the phone page always works.
+- **Phones that both have the app** (`core/.../Join.kt`, `Join.kt`, `NfcTag.kt`,
+  `ui/ConnectDialogs.kt`), from the **⋮** menu: the phone with the hotspot shows one join link,
+  `https://lightninglan.party/join/#v=1&s=<Wi-Fi>&p=<password>&h=<address>&o=<port>&i=<peer id>&n=<name>`,
+  as a QR code or as an NFC tag. The other phone opens it in the app: an App Link (verified
+  against `docs/.well-known/assetlinks.json`, so only the release signing key's builds open it
+  straight from the camera; other builds go through the site's join page, `docs/join/`), an
+  `NDEF_DISCOVERED` filter for the tag, or `lightninglan://join#…` from the join page. It asks
+  for the hotspot with a `WifiNetworkSpecifier` request (Android 10 and later; Android shows its
+  own "Connect?" prompt), binds the process to that network, since it has no internet, and calls
+  `POST /api/introduce` on the other phone every 30 seconds. Each side then polls the other as a
+  peer met directly (`PeerTable.meet`), forgotten after about two minutes out of reach. The tag
+  is an NFC Forum Type 4 tag (`core/.../NdefTag.kt`) behind a `HostApduService` that is switched
+  on only while the tap screen shows; on Android 15 that screen also stops the phone polling for
+  tags itself, so the other phone's reader finds it. Before Android 10, the person joins the
+  hotspot in the Wi-Fi settings and the app connects once the phone is on it.
 - **While you wait** (the second tab) has the desktop app's ten head-to-head games, played against
   computers and other phones alike (`core/.../Games.kt` and `Play.kt`, the same rules and records
   as `lightninglan/games.py` and `play.py`), and the solo Falling blocks game (`ui/BlocksGame.kt`).

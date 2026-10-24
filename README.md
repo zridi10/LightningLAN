@@ -251,6 +251,19 @@ It's for phones with nothing in common; when everyone is on a working Wi-Fi, sta
 most phones leave their own Wi-Fi while hosting and so lose the computers on it. See
 [INSTALL.md](INSTALL.md#android) for when to use which.
 
+**Two phones with the app, no Wi-Fi in common: one scan, or a tap.** The **⋮** menu in the Android
+app has **Connect a LightningLAN phone**, with a QR code or (on phones with NFC) a tap. The phone
+makes the same hotspot and hands the other one a single link,
+`https://lightninglan.party/join/#…`, holding the hotspot's name and password and the phone's
+address on it. The details are after the `#`, so a browser never sends them anywhere. On the
+other phone the link opens LightningLAN (Android checks the site's
+`.well-known/assetlinks.json` for that), which asks Android to join that Wi-Fi (Android 10 and
+later show a "Connect?" prompt; older versions need it joined in Settings) and then says hello
+to the first phone (`POST /api/introduce`), so the two find each other without any discovery.
+For the tap, the first phone acts as an NFC tag holding the link (an NFC Forum Type 4 tag, through
+Android's host card emulation), only while that screen is open. The other phone opens the link in
+LightningLAN by itself. A passphrase works as usual: both phones need the same one.
+
 ## While you wait
 
 The **While you wait** tab (next to **Files**) has games to play against anyone else on the network

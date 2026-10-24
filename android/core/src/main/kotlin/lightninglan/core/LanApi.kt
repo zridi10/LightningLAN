@@ -1,5 +1,11 @@
 package lightninglan.core
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.put
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicLong
@@ -13,9 +19,11 @@ import java.util.concurrent.atomic.AtomicLong
  *   GET /api/swarm/<id>            which pieces of a file we are downloading we have
  *   GET /api/piece/<id>/<n>        one verified piece of such a file
  *   GET /api/games                 this peer's half of its head-to-head games (Play.kt)
+ *   POST /api/introduce            a peer that joined this phone's hotspot says where it is (Join.kt;
+ *                                  the app's own: the desktop app doesn't make hotspots)
  *
- * Only GET and HEAD. While this peer is stopped they answer 503 and transfers in progress are cut
- * off. With a passphrase they need a valid peer token, and responses carry a proof header.
+ * Only GET and HEAD, but for that one. While this peer is stopped they answer 503 and transfers in
+ * progress are cut off. With a passphrase they need a valid peer token, and responses carry a proof header.
  *
  * The phone page (/phone, /static/) is PhoneApi.kt's; opening this phone's address in a browser
  * leads there.
@@ -142,6 +150,7 @@ class LanApi(private val node: Node, private val phone: PhoneApi) {
             if (proof != null) response.header(PROOF_HEADER, proof)
             return response
         }
+        if (path == "/api/introduce") return introduce(req)
         if (isPhoneRoute(path)) return phone.handle(req)
         if (path == "/" && (req.method == "GET" || req.method == "HEAD")) {
             // Someone typed this phone's address into a browser: the phone page tells them how to connect.
@@ -162,6 +171,45 @@ class LanApi(private val node: Node, private val phone: PhoneApi) {
             parts.size == 3 && parts[0] == "piece" -> servePiece(parts[1], parts[2])
             else -> jsonError(404, "not_found", "Not Found")
         }
+    }
+
+    /**
+     * A peer that joined this phone's hotspot (Join.kt) says who it is and which port it listens
+     * on: this phone polls it back, at the address the request came from (and no other).
+     */
+    private fun introduce(req: HttpRequest): HttpResponse {
+        if (req.method != "POST") return jsonError(405, "method_not_allowed", "Only POST is allowed here.")
+        if (!node.online) return jsonError(503, "offline", "This peer has stopped sharing.")
+        var proof: String? = null
+        var caller: String? = null
+        if (node.auth.enabled) {
+            val token = req.header(TOKEN_HEADER)
+            try {
+                caller = node.auth.verifyRequest(req.method, req.path, token)
+            } catch (e: AuthError) {
+                return jsonError(401, "auth_failed", e.message ?: "authentication failed", reason = e.reason)
+            }
+            proof = node.auth.proofFor(token!!)
+        }
+        val body = req.readBody(4096)?.let { runCatching { Json.parseToJsonElement(it.toString(Charsets.UTF_8)) }.getOrNull() } as? JsonObject
+        val peerId = (body?.get("peer_id") as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val port = (body?.get("port") as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
+        if (body == null || peerId == null || !isPeerId(peerId) || port == null || port !in 1..65535) {
+            return jsonError(400, "bad_request", "Expected the peer's ID and port.")
+        }
+        if (caller != null && caller != peerId) return jsonError(403, "forbidden", "That is another peer's ID.")
+        if (peerId == node.peerId) return jsonError(400, "bad_request", "That is this peer's own ID.")
+        val address = req.remoteAddress.removePrefix("::ffff:")
+        if (!isIpv4(address)) return jsonError(400, "bad_request", "Only IPv4 addresses for now.")
+        val rawName = (body["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val name = rawName?.let { displayName(it).trim().take(64) }?.ifEmpty { null } ?: peerId.take(8)
+        if (!node.peers.meet(peerId, name, address, port)) return jsonError(429, "too_many", "Too many peers met this way already.")
+        val response = json(200, buildJsonObject {
+            put("peer_id", node.peerId)
+            put("name", node.name)
+        }.toString())
+        if (proof != null) response.header(PROOF_HEADER, proof)
+        return response
     }
 
     private fun json(status: Int, body: String): HttpResponse =

@@ -32,6 +32,11 @@ private const val MAX_FILES_PER_PEER = 200_000
 private const val MAX_SWARM_FILES = 10_000
 private const val OFFLINE_RETRY_INTERVAL = 10_000L
 private const val IGNORED_RETRY_INTERVAL = 30_000L
+private const val MAX_DIRECT = 16
+private const val DIRECT_FORGET_FAILURES = 12 // failed polls in a row: about two minutes
+
+/** The service name of a peer met directly ([PeerTable.meet]), not through discovery. */
+private const val DIRECT_SERVICE = "direct:"
 
 const val PENDING = "pending"
 const val ONLINE = "online"
@@ -73,6 +78,9 @@ class Peer(val peerId: String, name: String, port: Int, addresses: List<String>)
     @Volatile var games: Set<String>? = null // which ones (null: the first three, from before it said)
 
     val online: Boolean get() = state == ONLINE
+
+    /** Met directly (on a hotspot, see Join.kt), not (only) through discovery. */
+    val direct: Boolean get() = serviceNames.any { it.startsWith(DIRECT_SERVICE) }
 
     fun candidateAddresses(): List<String> {
         val current = address
@@ -220,6 +228,43 @@ class PeerTable(
         }
     }
 
+    // ----- peers met directly (Join.kt) --------------------------------------------------------
+
+    /**
+     * A peer met without discovery: the one whose hotspot this phone joined, or one that introduced
+     * itself (POST /api/introduce). It is polled like any other, and forgotten after about two
+     * minutes out of reach unless discovery knows it too; meeting it again starts that over. False
+     * if too many peers met this way are known already.
+     */
+    @Synchronized
+    fun meet(peerId: String, name: String, address: String, port: Int): Boolean {
+        if (peerId == ownPeerId) return false
+        var peer = peers[peerId]
+        if (peer == null) {
+            if (peers.values.count { it.direct } >= MAX_DIRECT) return false
+            peer = Peer(peerId, name, port, listOf(address))
+            peers[peerId] = peer
+            CoreLog.i(TAG, "met peer $name at $address:$port")
+        } else if (peer.port != port || address !in peer.addresses) {
+            peer.address = null
+            peer.port = port
+            peer.addresses = listOf(address) + peer.addresses.filter { it != address }
+        }
+        peer.serviceNames.add(DIRECT_SERVICE + peerId)
+        peer.failures = 0
+        peer.nextPoll = 0
+        wake()
+        return true
+    }
+
+    /** Forgets a peer met directly (this phone left its hotspot); if discovery knows it too, it stays. */
+    fun part(peerId: String) = serviceLost(DIRECT_SERVICE + peerId)
+
+    @Synchronized
+    private fun forget(peer: Peer) {
+        if (peers.remove(peer.peerId, peer)) CoreLog.i(TAG, "forgot ${peer.name}, out of reach for a while")
+    }
+
     fun wake() {
         synchronized(wakeLock) {
             wake = true
@@ -364,6 +409,10 @@ class PeerTable(
         }
         val retry = if (peer.state == OFFLINE) minOf(OFFLINE_RETRY_INTERVAL, 4 * refreshMs) else refreshMs
         peer.nextPoll = monotonicMs() + retry
+        // Met directly and gone (it left the hotspot, say): no discovery will say goodbye for it.
+        if (peer.state != ONLINE && peer.failures >= DIRECT_FORGET_FAILURES && peer.serviceNames.all { it.startsWith(DIRECT_SERVICE) }) {
+            forget(peer)
+        }
     }
 
     private fun ignore(peer: Peer, reason: String) {
@@ -395,7 +444,7 @@ fun readLimited(resp: Response, limit: Long): ByteArray {
     return out.toByteArray()
 }
 
-private fun authReason(body: ByteArray, weHavePassphrase: Boolean): String {
+internal fun authReason(body: ByteArray, weHavePassphrase: Boolean): String {
     var reason = try {
         ((json.parseToJsonElement(body.toString(Charsets.UTF_8)) as? JsonObject)?.get("reason") as? JsonPrimitive)?.content
     } catch (e: Exception) {

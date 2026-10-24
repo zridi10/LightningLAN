@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join a LightningLAN phone</title>
+  <meta name="description" content="This link connects two phones that both have LightningLAN.">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#12052a">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <!-- A phone's join link (the app's "Connect a LightningLAN phone" QR code or NFC tap) opened in a
+       browser: LightningLAN isn't on this phone, or isn't set to open these links. The details are
+       after the #, which the browser never sends here; the button hands them to the app. -->
+  <div class="scene" aria-hidden="true">
+    <div class="sw-stars"></div>
+    <div class="sw-sun"></div>
+    <div class="sw-mountains"></div>
+    <div class="sw-floor"><div class="sw-grid"></div></div>
+  </div>
+
+  <main class="page">
+    <header class="hero">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+      <h1 class="brand">LightningLAN</h1>
+      <p class="tagline">This link connects two phones that both have LightningLAN.</p>
+    </header>
+
+    <section class="card get" aria-label="Open the link">
+      <p>Already have LightningLAN on this phone? Open the link in it:</p>
+      <div class="downloads">
+        <a class="dl" id="open" href="lightninglan://join">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+          <span><strong>Open in LightningLAN</strong><small>Android</small></span>
+        </a>
+      </div>
+      <p class="note">Not yet? Get the Android app, open it once, then scan the code (or tap the phones) again.</p>
+      <a class="dl-small" href="https://github.com/zridi10/LightningLAN/releases/latest/download/LightningLAN-android.apk">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 1h10a2 2 0 0 1 2 2v18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zm0 3v14h10V4H7zm4 15.5h2v1.5h-2v-1.5z"/></svg>
+        Android app (APK)
+      </a>
+      <p class="note">An iPhone, or no app? Ask the other phone for its phone button's QR code instead: that one
+        works in any phone's web browser.</p>
+      <p class="note"><a href="../">What's LightningLAN?</a></p>
+    </section>
+  </main>
+
+  <script>
+    // The link's details are after the #: hand them to the app, as they are.
+    document.getElementById("open").href = "lightninglan://join" + location.hash;
+  </script>
+</body>
+</html>

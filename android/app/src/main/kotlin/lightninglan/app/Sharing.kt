@@ -26,6 +26,7 @@ import lightninglan.core.PhoneLink
 import lightninglan.core.PlayError
 import lightninglan.core.PlayView
 import lightninglan.core.GameView
+import lightninglan.core.JoinLink
 import lightninglan.core.STOPPED
 import lightninglan.core.deriveKey
 import lightninglan.core.numberedNames
@@ -41,7 +42,8 @@ import java.util.concurrent.Executors
 private const val TAG = "app"
 private const val PORT = 8765
 
-data class PeerView(val peerId: String, val name: String, val address: String, val files: Int, val reason: String?)
+/** [direct]: met on a hotspot (Join.kt), not found on a shared Wi-Fi. */
+data class PeerView(val peerId: String, val name: String, val address: String, val files: Int, val reason: String?, val direct: Boolean = false)
 
 /** Everything the screens show, read in one go. */
 data class UiSnapshot(
@@ -63,6 +65,8 @@ data class UiSnapshot(
     val play: PlayView?,
     /** This phone's own Wi-Fi, for phones with no Wi-Fi in common (Hotspot.kt). */
     val hotspot: HotspotState,
+    /** This phone on another phone's hotspot (Join.kt). */
+    val join: JoinState,
 )
 
 /**
@@ -98,6 +102,22 @@ class Sharing(private val app: Application) {
     /** This phone's own Wi-Fi network, when there's none in common with the other phones. */
     private val hotspot = Hotspot(app) {}
 
+    /** Another phone's hotspot, joined from its join link (one QR code or an NFC tap). */
+    private val joining = HotspotJoin(
+        app,
+        introduce = { link -> node?.introduce(link) ?: "Starting…" },
+        isOnline = { peerId -> node?.peers?.get(peerId)?.online == true },
+        part = { peerId -> node?.peers?.part(peerId) },
+    )
+
+    /** A join link opened before the first setup finished: joined right after it. */
+    @Volatile
+    private var pendingJoin: JoinLink? = null
+
+    init {
+        NfcTag.close(app) // a tap screen the app didn't get to close (it crashed, say)
+    }
+
     // ----- sharing on and off ------------------------------------------------------------------
 
     /** The app came to the front: share, unless Stop was pressed. */
@@ -114,6 +134,7 @@ class Sharing(private val app: Application) {
     fun stop() {
         stoppedByPerson = true
         hotspot.stop() // nothing to reach through it any more
+        joining.leave()
         control.execute { node?.goOffline(STOPPED) }
         app.stopService(Intent(app, SharingService::class.java))
     }
@@ -171,19 +192,22 @@ class Sharing(private val app: Application) {
             status = n?.status(),
             files = n?.commonFiles() ?: emptyList(),
             downloads = n?.downloads?.list() ?: emptyList(),
-            peers = n?.peers?.online()?.map { PeerView(it.peerId, it.name, "${it.address ?: it.addresses.firstOrNull()}:${it.port}", it.files.size, null) }
+            peers = n?.peers?.online()
+                ?.map { PeerView(it.peerId, it.name, "${it.address ?: it.addresses.firstOrNull()}:${it.port}", it.files.size, null, it.direct) }
                 ?: emptyList(),
             ignored = n?.peers?.ignored()?.map { PeerView(it.peerId, it.name, "${it.addresses.firstOrNull()}:${it.port}", 0, it.ignoreReason) }
                 ?: emptyList(),
             linked = entries.filter { it.key.startsWith("link:") }.map { it.sha256 }.toSet(),
             busy = busy,
-            onWifi = onLocalNetwork() || phoneAddresses().isNotEmpty(), // this phone's own hotspot counts too
+            // This phone's own hotspot counts too, and another phone's.
+            onWifi = onLocalNetwork() || phoneAddresses().isNotEmpty() || joining.state is JoinState.Joined,
             problem = problem,
             shareFolder = settings.shareFolder?.let(::folderLabel),
             downloadsFolder = settings.downloadsFolder?.let(::folderLabel),
             addresses = localAddresses(),
             play = n?.arcade?.view(),
             hotspot = hotspot.state,
+            join = joining.state,
         )
     }
 
@@ -290,6 +314,33 @@ class Sharing(private val app: Application) {
 
     fun stopHotspot() = hotspot.stop()
 
+    // ----- another phone with the app, on this phone's hotspot or the other way round (Join.kt) ----------
+
+    /** The link another phone with the app joins this one from (its QR code, or the NFC tap); null until the hotspot is up. */
+    fun joinLink(): JoinLink? {
+        val on = hotspot.state as? HotspotState.On ?: return null
+        val n = node?.takeIf { it.online } ?: return null
+        return JoinLink(on.ssid, on.password, on.wpa3Only, on.address ?: return null, n.port, n.peerId, n.name, n.auth.enabled)
+    }
+
+    /** Joins the hotspot of the phone [link] came from. On the main thread, with the app on screen. */
+    fun join(link: JoinLink) {
+        when {
+            link.peerId == settings.peerId -> toast("That's this phone's own code.")
+            NfcTag.message != null -> CoreLog.i(TAG, "a tap from ${link.name} while this phone hands out its own: ignored")
+            !settings.setupDone -> pendingJoin = link // the first setup is under way
+            else -> {
+                hotspot.stop() // a phone can't usually make a hotspot and join another at once
+                if (node?.online != true) start()
+                joining.join(link)
+            }
+        }
+    }
+
+    fun leaveHotspot() = joining.leave()
+
+    fun joinAgain() = joining.retry()
+
     // ----- this phone's files -------------------------------------------------------------------
 
     /**
@@ -307,7 +358,13 @@ class Sharing(private val app: Application) {
                 applyShareTree(it)
                 it.setDownloadFolder(LocalDownloadFolder(app, downloads))
             }
-            main.post { start() }
+            main.post {
+                start()
+                pendingJoin?.let {
+                    pendingJoin = null
+                    join(it)
+                }
+            }
         } catch (e: Exception) {
             CoreLog.e(TAG, "making the folders failed", e)
             problem = "Could not make the LightningLAN folders: ${e.message}"

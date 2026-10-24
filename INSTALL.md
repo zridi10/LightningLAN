@@ -110,9 +110,26 @@ Use the hotspot when:
 Skip it when everyone is already on the same working Wi-Fi, especially with computers: most phones
 leave their own Wi-Fi while they host a hotspot, so your phone can't reach the computers on that
 Wi-Fi until you stop it. A hotspot also uses more battery, and it only reaches about as far as
-the next room. Computers and other phones with the app can join the hotspot too (with its name and
-password); whether they find each other there by themselves depends on the phone, but a phone
-with the app can always use step 2 in its browser.
+the next room. Computers can join the hotspot too (with its name and password); whether they
+find LightningLAN there by themselves depends on the phone, but a browser can always use step 2.
+
+**Both phones have the app? One scan, or a tap.** When the other phone has LightningLAN too, it
+doesn't need two codes. Tap **⋮** at the top right:
+
+- **Connect a LightningLAN phone (QR code)**: tap **Make a hotspot**. The other phone scans the
+  code with its camera and taps the link. LightningLAN opens there, and Android asks to connect to
+  the hotspot: tap **Connect**. That's it, the two see each other's files and can play.
+- **Connect a LightningLAN phone (NFC tap)**, on phones with NFC: tap **Make a hotspot**, then hold
+  the other phone against yours, back to back (it has to be unlocked, with NFC on). LightningLAN
+  opens on it, and Android asks to connect: tap **Connect**. Keep the tap screen open until it's
+  connected. Not every pair of phones can read each other; the QR code always works.
+
+On the other phone, the status card says whose hotspot it's on, with a **Leave** button that
+takes it back to its own Wi-Fi. If the camera opens a web page instead of LightningLAN, tap
+**Open in LightningLAN** on that page. Android 8 and 9 can't join a Wi-Fi for an app: there,
+LightningLAN shows the hotspot's name and password to join in the Wi-Fi settings, and connects
+once you're on it. Same Wi-Fi already? None of this is needed: phones with the app find each
+other by themselves.
 
 ## 3. Using LightningLAN
 

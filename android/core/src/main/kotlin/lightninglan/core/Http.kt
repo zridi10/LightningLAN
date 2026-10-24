@@ -334,6 +334,7 @@ fun reasonPhrase(status: Int): String = when (status) {
     409 -> "Conflict"
     413 -> "Content Too Large"
     416 -> "Range Not Satisfiable"
+    429 -> "Too Many Requests"
     500 -> "Internal Server Error"
     502 -> "Bad Gateway"
     503 -> "Service Unavailable"

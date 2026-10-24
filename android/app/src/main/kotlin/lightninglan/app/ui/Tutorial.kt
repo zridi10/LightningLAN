@@ -103,6 +103,11 @@ private val STEPS = listOf(
             "No Wi-Fi in common? This phone can make a hotspot there too.",
     ),
     TutorialStep(
+        "more", "Phones with LightningLAN",
+        "Two phones that both have LightningLAN, and no Wi-Fi in common? This menu connects them with one QR code, or " +
+            "with a tap if both have NFC. On the same Wi-Fi they find each other by themselves.",
+    ),
+    TutorialStep(
         "playTab", "While you wait", "Download taking a while? Play games against the others on the network.",
         tapOpens = "play", hint = "Tap While you wait to have a look.",
     ),
@@ -214,6 +219,8 @@ internal fun TutorialOverlay(tutorial: Tutorial, showTab: (String) -> Unit) {
                 .semantics { liveRegion = LiveRegionMode.Polite },
             shape = RoundedCornerShape(16.dp),
             color = LocalAppStyle.current.solidSurface,
+            // Not under a screen's Surface here, so the text would be black on every theme without this.
+            contentColor = MaterialTheme.colorScheme.onSurface,
             shadowElevation = 12.dp,
         ) {
             Column(Modifier.padding(start = 18.dp, top = 16.dp, end = 12.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

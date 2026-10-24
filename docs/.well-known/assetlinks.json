@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.zridi10.lightninglan",
+      "sha256_cert_fingerprints": [
+        "6F:21:2B:86:88:B8:60:76:9D:BA:AD:70:F7:DF:9B:B8:FB:67:8B:BB:8A:F1:D3:C6:08:DD:D4:32:F8:1C:4A:D1"
+      ]
+    }
+  }
+]

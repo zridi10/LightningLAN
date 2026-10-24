@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.net.wifi.SoftApConfiguration
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
@@ -30,8 +31,8 @@ sealed interface HotspotState {
 
     data object Starting : HotspotState
 
-    /** [address]: this phone's address on the hotspot, once it has one. */
-    data class On(val ssid: String, val password: String?, val address: String?) : HotspotState
+    /** [address]: this phone's address on the hotspot, once it has one. [wpa3Only]: phones that only know WPA2 can't join. */
+    data class On(val ssid: String, val password: String?, val address: String?, val wpa3Only: Boolean = false) : HotspotState
 
     data class Failed(val message: String) : HotspotState
 }
@@ -85,9 +86,9 @@ class Hotspot(context: Context, private val changed: () -> Unit) {
                         return
                     }
                     reservation = r
-                    val (ssid, password) = credentials(r)
-                    CoreLog.i(TAG, "hotspot $ssid is on")
-                    set(HotspotState.On(ssid, password, null))
+                    val on = credentials(r)
+                    CoreLog.i(TAG, "hotspot ${on.ssid} is on")
+                    set(on)
                     findAddress(before, System.currentTimeMillis() + ADDRESS_WAIT_MS)
                 }
 
@@ -139,14 +140,15 @@ class Hotspot(context: Context, private val changed: () -> Unit) {
         }
     }
 
+    /** Its name and password (no address yet). */
     @Suppress("DEPRECATION") // the older ways, for the Android versions that only have those
-    private fun credentials(r: WifiManager.LocalOnlyHotspotReservation): Pair<String, String?> =
+    private fun credentials(r: WifiManager.LocalOnlyHotspotReservation): HotspotState.On =
         if (Build.VERSION.SDK_INT >= 30) {
             val c = r.softApConfiguration
-            (c.ssid ?: "") to c.passphrase
+            HotspotState.On(c.ssid ?: "", c.passphrase, null, wpa3Only = c.securityType == SoftApConfiguration.SECURITY_TYPE_WPA3_SAE)
         } else {
             val c = r.wifiConfiguration
-            (c?.SSID?.removeSurrounding("\"") ?: "") to c?.preSharedKey?.removeSurrounding("\"")
+            HotspotState.On(c?.SSID?.removeSurrounding("\"") ?: "", c?.preSharedKey?.removeSurrounding("\""), null)
         }
 
     private fun failure(reason: Int): String = when (reason) {

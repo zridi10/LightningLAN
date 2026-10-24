@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">LightningLAN</string>
     <string name="channel_sharing">Sharing</string>
+    <string name="nfc_tag">LightningLAN tap to connect</string>
 </resources>
