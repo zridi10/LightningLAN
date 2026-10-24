@@ -216,6 +216,16 @@ class Node:
             return False
         return hmac.compare_digest(stored.encode("utf-8"), key.encode("utf-8"))
 
+    async def tutorial_seen(self) -> None:
+        """The web UI started its tutorial: it never plays by itself again (Settings can still show it)."""
+        if not self.settings.tutorial_due:
+            return
+        self.settings.tutorial_due = False
+        try:
+            await asyncio.to_thread(update_config_file, self.settings.config_path, {"tutorial_due": None})
+        except ConfigError as exc:
+            log.warning("could not remember that the tutorial was shown: %s", exc)
+
     async def ensure_phone_key(self, new: bool = False) -> str:
         """The secret in the phone link: made the first time it is asked for and kept in the config
         file, so phones stay connected. new=True replaces it, which disconnects every phone."""
@@ -311,6 +321,7 @@ class Node:
             "online": self.online,
             "offline_reason": self.offline_reason,
             "first_run": self.settings.first_run,
+            "tutorial_due": self.settings.tutorial_due,
             "phones": self.phones,
         }
 

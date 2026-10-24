@@ -549,4 +549,54 @@ class InteropTest {
         assertEquals("lost", phoneGame(phone, sprint).result)
         assertEquals(0 to 10, phoneGame(phone, sprint).sprint!!.score)
     }
+
+    /** The keys of a JSON value, all the way down (arrays by their first element), to compare two views' shapes. */
+    private fun shape(e: JsonElement?): Any? = when (e) {
+        is JsonObject -> e.mapValues { shape(it.value) }
+        is JsonArray -> if (e.isEmpty()) "[]" else listOf(shape(e.first()))
+        else -> "value"
+    }
+
+    private fun sameShape(desk: JsonElement?, phone: JsonElement?, where: String) {
+        if (desk is JsonObject && phone is JsonObject) {
+            assertEquals(desk.keys, phone.keys, "the keys of $where")
+            for (k in desk.keys) sameShape(desk[k], phone[k], "$where.$k")
+        } else if (desk is JsonArray && phone is JsonArray && desk.isNotEmpty() && phone.isNotEmpty()) {
+            sameShape(desk.first(), phone.first(), "$where[0]")
+        } else if ((desk is JsonObject) != (phone is JsonObject) || (desk is JsonArray) != (phone is JsonArray)) {
+            if (desk !is JsonNull && phone !is JsonNull) throw AssertionError("$where: ${shape(desk)} vs ${shape(phone)}")
+        }
+    }
+
+    @Test
+    fun `the phone page gets the games in the desktop page's format`() {
+        requirePython()
+        val (phone, desk) = players()
+        // Each side has sent an invitation (a waiting game) and has one to answer.
+        val fromDesk = desk.post("/api/play/invite", """{"peer_id":"${phone.node.peerId}","kind":"rps","best_of":5}""").jsonObject["id"]!!.jsonPrimitive.content
+        val fromPhone = phone.node.arcade.invite(desk.peerId, RPS, bestOf = 5).id
+        waitFor("both invitations to arrive", 15_000) {
+            phone.node.arcade.view().invites.any { it.id == fromDesk } &&
+                desk.get("/api/play").jsonObject["invites"]!!.jsonArray.any { it.jsonObject["id"]!!.jsonPrimitive.content == fromPhone }
+        }
+        val deskView = desk.get("/api/play").jsonObject
+        val phoneView = playJson(phone.node.arcade.view())
+        sameShape(deskView, phoneView, "the view")
+        phone.node.arcade.answer(fromDesk, false)
+        desk.post("/api/play/$fromPhone/decline")
+        waitFor("the invitations to go", 15_000) {
+            phone.node.arcade.view().let { v -> v.invites.isEmpty() && v.games.none { it.status == GAME_WAITING } }
+        }
+        // Every game, as both sides see it once it is on.
+        for (kind in GAME_TITLES.keys) {
+            val id = deskStart(desk, phone, kind)
+            waitFor("the phone to see $kind start", 15_000) { phoneGame(phone, id).status == GAME_PLAYING }
+            sameShape(deskGame(desk, id), gameJson(phoneGame(phone, id)), kind)
+            desk.post("/api/play/$id/resign")
+            waitFor("$kind to end", 15_000) { phoneGame(phone, id).status == GAME_OVER }
+            sameShape(deskGame(desk, id), gameJson(phoneGame(phone, id)), "$kind (over)")
+            desk.post("/api/play/$id/close")
+            phone.node.arcade.close(id)
+        }
+    }
 }

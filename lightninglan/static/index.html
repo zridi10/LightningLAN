@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/blocks.js" defer></script>
   <script src="/static/play.js" defer></script>
+  <script src="/static/tutorial.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -116,19 +117,6 @@
 
   <main id="files-panel" class="layout" role="tabpanel" aria-labelledby="tab-files">
     <section class="main-col">
-      <section id="welcome" class="card welcome" hidden>
-        <h2>Welcome to LightningLAN</h2>
-        <p>Files in your shared folder are visible to everyone on this network who runs LightningLAN.
-           Other computers show up here by themselves, and so do their files. Nothing to set up.</p>
-        <p>You're <strong id="welcome-name"></strong>, a name picked just for you. Click the pencil next to
-           it at the top to change it.</p>
-        <p class="muted small">Your shared folder: <code id="welcome-share"></code></p>
-        <div class="welcome-actions">
-          <button id="welcome-settings" class="btn secondary" type="button">Change folders or name</button>
-          <button id="welcome-dismiss" class="btn" type="button">Got it</button>
-        </div>
-      </section>
-
       <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
            aria-label="Add files to ThunderCLOUD: drop files here or press Enter to choose files">
         <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l5 5h-3v6h-4V8H7l5-5zM5 16h2v3h10v-3h2v5H5v-5z"/></svg>
@@ -247,6 +235,14 @@
         </div>
         <span class="field-help">Only computers that use the same passphrase see each other. Leave it empty to share
           with everyone on the network running LightningLAN.</span>
+      </div>
+
+      <div class="field">
+        <span class="field-label">Tutorial</span>
+        <div class="field-row">
+          <button id="set-tutorial" type="button" class="btn secondary">Show the tutorial</button>
+        </div>
+        <span class="field-help">A quick tour of the main buttons, like the one on the first start.</span>
       </div>
 
       <p id="settings-error" class="form-error" role="alert" hidden></p>

@@ -63,6 +63,8 @@ class Settings:
     # The name was made up by LightningLAN, not picked by the person: it changes by itself if another
     # peer turns out to have the same one (Node._check_name).
     name_generated: bool = False
+    # The web UI plays its tutorial by itself once: on the first run (and until it has been shown).
+    tutorial_due: bool = False
     # Runtime-only options (never written to the config file).
     interfaces: list[str] | None = None
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
@@ -180,6 +182,8 @@ def load_settings(
     phone_key = data.get("phone_key")
     if not isinstance(phone_key, str) or not PHONE_KEY_RE.match(phone_key):
         phone_key = None
+    # Configs from before the tutorial don't say: someone who has used LightningLAN already doesn't need it.
+    tutorial_due = first_run or data.get("tutorial_due") is True
 
     share_dir = prepare_folder(share_dir, "shared")
     downloads_dir = prepare_folder(downloads_dir, "downloads")
@@ -195,6 +199,7 @@ def load_settings(
         config_path=path,
         first_run=first_run,
         name_generated=generated,
+        tutorial_due=tutorial_due,
     )
 
     if save:
@@ -208,6 +213,8 @@ def load_settings(
         if name is not None or not stored_name.strip():
             updated["name"] = resolved_name
         updated["name_generated"] = generated
+        if tutorial_due:
+            updated["tutorial_due"] = True
         if updated != data:
             try:
                 write_config_file(path, updated)

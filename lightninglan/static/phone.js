@@ -1,8 +1,9 @@
 /* LightningLAN on a phone. Plain ES2017, no build step.
  *
- * Served by a computer running LightningLAN to a phone on the same Wi-Fi, after the phone
- * scanned the QR code in that computer's web UI (the key from it lives in a cookie). Every piece
- * of text that came from a file name or a peer is inserted with textContent, never as HTML.
+ * Served to a phone on the same Wi-Fi by a computer running LightningLAN, or by a phone running
+ * the Android app (android/core/.../PhoneApi.kt), after the phone scanned the QR code there (the
+ * key from it lives in a cookie). Every piece of text that came from a file name or a peer is
+ * inserted with textContent, never as HTML.
  */
 (function () {
   'use strict';
@@ -124,8 +125,8 @@
     $('pair').hidden = false;
     if (window.location.hash === '#expired') {
       $('pair-title').textContent = 'That QR code is out of date';
-      $('pair-text').textContent = 'Scan the new one: on your computer, open LightningLAN and click the phone ' +
-        'button at the top.';
+      $('pair-text').textContent = 'Scan the new one: open LightningLAN on the computer or phone that runs it ' +
+        'and press the phone button at the top.';
     }
   }
 
@@ -154,6 +155,7 @@
     $('pc-name').textContent = s.name;
     $('send-name').textContent = s.name;
     $('stopped-name').textContent = s.name;
+    $('offline-name').textContent = s.name;
     document.title = 'LightningLAN — ' + s.name;
     $('stopped-banner').hidden = s.online;
     var n = s.peers_online;
@@ -163,7 +165,8 @@
   }
 
   // While this page is showing it holds a session, which keeps LightningLAN sharing on the
-  // computer even if its own page there was closed. It also says at once when Stop or Start is pressed.
+  // computer even if its own page there was closed (and lets the phone app count the phones
+  // connected). It also says at once when Stop or Start is pressed.
   function holdSession() {
     if (state.session) return;
     state.session = new EventSource('/phone/api/session');
@@ -188,8 +191,13 @@
 
   var collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
+  // The computer or phone this page is connected to.
+  function hostName() {
+    return state.status ? state.status.name : 'the device running LightningLAN';
+  }
+
   function sharerName(s) {
-    return s.self ? (state.status ? state.status.name : 'the computer') : s.name;
+    return s.self ? hostName() : s.name;
   }
 
   function sortedFiles() {
@@ -244,8 +252,7 @@
   }
 
   function owners(f) {
-    var pc = state.status ? state.status.name : 'the computer';
-    return f.sources.map(function (s) { return s.self ? pc : s.name; }).join(', ');
+    return f.sources.map(sharerName).join(', ');
   }
 
   function fileItem(f, online) {
@@ -275,7 +282,7 @@
     get.addEventListener('click', function (e) {
       if (!state.status || !state.status.online) {
         e.preventDefault();
-        toast('LightningLAN is stopped on the computer. Start it there first.', 'error');
+        toast('LightningLAN is stopped on ' + hostName() + '. Start it there first.', 'error');
         return;
       }
       toast('Downloading ' + f.name.slice(slash + 1) + '… Your browser shows how it is going.');
@@ -297,7 +304,7 @@
 
     var empty = $('files-empty');
     if (!state.files.length) {
-      empty.textContent = 'Nothing shared yet. Send a file from this phone, or wait for computers running ' +
+      empty.textContent = 'Nothing shared yet. Send a file from this phone, or wait for others running ' +
         'LightningLAN to share some.';
     } else if (!items.length) {
       empty.textContent = state.filter.trim() ? 'No files match “' + state.filter.trim() + '”.' : 'No files from them.';
@@ -386,7 +393,7 @@
       else finishUpload(job, false, errorMessage(data, xhr.status));
     };
     xhr.onerror = function () {
-      finishUpload(job, false, 'The connection to the computer was lost. Keep this page open while files send.');
+      finishUpload(job, false, 'The connection to ' + hostName() + ' was lost. Keep this page open while files send.');
     };
     xhr.send(job.file);
   }

@@ -25,6 +25,12 @@ fun ByteArray.toHex(): String {
 
 fun sha256Hex(data: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(data).toHex()
 
+private val secureRandom = java.security.SecureRandom()
+
+/** [bytes] random bytes as URL-safe base64 without padding (Python's secrets.token_urlsafe). */
+fun randomToken(bytes: Int): String =
+    java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(bytes).also(secureRandom::nextBytes))
+
 /** Milliseconds from a clock that never jumps (for intervals and deadlines). */
 fun monotonicMs(): Long = System.nanoTime() / 1_000_000
 

@@ -22,6 +22,7 @@ kotlin {
 dependencies {
     api("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("com.google.zxing:core:3.5.3") // the phone page's QR codes (only its encoder is used)
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")

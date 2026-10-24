@@ -16,6 +16,9 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Only GET and HEAD. While this peer is stopped they answer 503 and transfers in progress are cut
  * off. With a passphrase they need a valid peer token, and responses carry a proof header.
+ *
+ * The phone page (/phone, /static/) is PhoneApi.kt's; opening this phone's address in a browser
+ * leads there.
  */
 
 private const val STREAM_CHUNK = 256 * 1024
@@ -117,7 +120,7 @@ private class FileBody(
     }
 }
 
-class LanApi(private val node: Node) {
+class LanApi(private val node: Node, private val phone: PhoneApi) {
     fun handle(req: HttpRequest): HttpResponse {
         val path = req.path
         if (isLanRoute(path)) {
@@ -139,7 +142,11 @@ class LanApi(private val node: Node) {
             if (proof != null) response.header(PROOF_HEADER, proof)
             return response
         }
-        if (path == "/" && (req.method == "GET" || req.method == "HEAD")) return homePage()
+        if (isPhoneRoute(path)) return phone.handle(req)
+        if (path == "/" && (req.method == "GET" || req.method == "HEAD")) {
+            // Someone typed this phone's address into a browser: the phone page tells them how to connect.
+            return if (node.phonePage != null) HttpResponse(307).header("Location", "/phone") else homePage()
+        }
         return jsonError(404, "not_found", "Not Found")
     }
 
@@ -149,7 +156,7 @@ class LanApi(private val node: Node) {
         if (path == "/api/games") return games(req)
         val parts = path.removePrefix("/api/").split("/")
         return when {
-            parts.size == 2 && parts[0] == "download" -> serveDownload(parts[1], req)
+            parts.size == 2 && parts[0] == "download" -> serveDownload(node, parts[1], req)
             parts.size == 2 && parts[0] == "pieces" -> pieceList(parts[1])
             parts.size == 2 && parts[0] == "swarm" -> swarmStatus(parts[1])
             parts.size == 3 && parts[0] == "piece" -> servePiece(parts[1], parts[2])
@@ -177,52 +184,6 @@ class LanApi(private val node: Node) {
         }
         return HttpResponse(200, BytesBody(body)).header("Content-Type", "application/json")
             .header("ETag", etag).header("Cache-Control", "no-cache")
-    }
-
-    private fun serveDownload(fileId: String, req: HttpRequest): HttpResponse {
-        if (!SHA256_RE.matches(fileId)) return jsonError(404, "not_found", "No such file.")
-        val entry = node.indexer.lookup(fileId) ?: return jsonError(404, "not_found", "This peer does not share that file (any more).")
-        val file = node.indexer.open(entry)
-        if (file == null) {
-            node.indexer.requestRescan()
-            return jsonError(404, "not_found", "This peer does not share that file (any more).")
-        }
-        if (file.size != entry.size || file.mtimeMs / 1000 != entry.mtimeMs / 1000) {
-            file.close()
-            node.indexer.requestRescan()
-            return jsonError(409, "changed", "The file changed since it was indexed; try again shortly.")
-        }
-        val size = entry.size
-        val etag = "\"${entry.sha256}\""
-        var start = 0L
-        var end = size - 1
-        var status = 200
-        val range = req.header("range")
-        val ifRange = req.header("if-range")
-        if (range != null && (ifRange == null || ifRange.trim() == etag)) {
-            when (val parsed = parseRange(range, size)) {
-                RangeResult.Unsatisfiable -> {
-                    file.close()
-                    return jsonError(416, "range_not_satisfiable", "Requested range is past the end of the file.")
-                        .header("Content-Range", "bytes */$size")
-                }
-                is RangeResult.Bytes -> {
-                    start = parsed.start
-                    end = parsed.end
-                    status = 206
-                }
-                null -> {}
-            }
-        }
-        val length = maxOf(0L, end - start + 1)
-        val response = HttpResponse(status, FileBody(file, start, length, node.uploads)) { file.close() }
-            .header("Content-Type", "application/octet-stream")
-            .header("Accept-Ranges", "bytes")
-            .header("ETag", etag)
-            .header("Content-Disposition", "attachment; filename*=UTF-8''${quoteFilename(entry.relpath.substringAfterLast('/'))}")
-            .header("Cache-Control", "no-store")
-        if (status == 206) response.header("Content-Range", "bytes $start-$end/$size")
-        return response
     }
 
     private fun pieceList(fileId: String): HttpResponse {
@@ -256,6 +217,53 @@ class LanApi(private val node: Node) {
         return HttpResponse(200, BytesBody(html.toByteArray(Charsets.UTF_8)))
             .header("Content-Type", "text/html; charset=utf-8").header("Cache-Control", "no-cache")
     }
+}
+
+/** A file this peer shares, with HTTP Range (for other peers, and for phone pages). */
+internal fun serveDownload(node: Node, fileId: String, req: HttpRequest): HttpResponse {
+    if (!SHA256_RE.matches(fileId)) return jsonError(404, "not_found", "No such file.")
+    val entry = node.indexer.lookup(fileId) ?: return jsonError(404, "not_found", "This peer does not share that file (any more).")
+    val file = node.indexer.open(entry)
+    if (file == null) {
+        node.indexer.requestRescan()
+        return jsonError(404, "not_found", "This peer does not share that file (any more).")
+    }
+    if (file.size != entry.size || file.mtimeMs / 1000 != entry.mtimeMs / 1000) {
+        file.close()
+        node.indexer.requestRescan()
+        return jsonError(409, "changed", "The file changed since it was indexed; try again shortly.")
+    }
+    val size = entry.size
+    val etag = "\"${entry.sha256}\""
+    var start = 0L
+    var end = size - 1
+    var status = 200
+    val range = req.header("range")
+    val ifRange = req.header("if-range")
+    if (range != null && (ifRange == null || ifRange.trim() == etag)) {
+        when (val parsed = parseRange(range, size)) {
+            RangeResult.Unsatisfiable -> {
+                file.close()
+                return jsonError(416, "range_not_satisfiable", "Requested range is past the end of the file.")
+                    .header("Content-Range", "bytes */$size")
+            }
+            is RangeResult.Bytes -> {
+                start = parsed.start
+                end = parsed.end
+                status = 206
+            }
+            null -> {}
+        }
+    }
+    val length = maxOf(0L, end - start + 1)
+    val response = HttpResponse(status, FileBody(file, start, length, node.uploads)) { file.close() }
+        .header("Content-Type", "application/octet-stream")
+        .header("Accept-Ranges", "bytes")
+        .header("ETag", etag)
+        .header("Content-Disposition", "attachment; filename*=UTF-8''${quoteFilename(entry.relpath.substringAfterLast('/'))}")
+        .header("Cache-Control", "no-store")
+    if (status == 206) response.header("Content-Range", "bytes $start-$end/$size")
+    return response
 }
 
 fun etagMatches(ifNoneMatch: String?, etag: String): Boolean {

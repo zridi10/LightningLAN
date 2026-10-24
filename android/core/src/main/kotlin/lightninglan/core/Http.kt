@@ -18,14 +18,17 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /*
- * A small HTTP/1.1 server for the peer-to-peer API: GET and HEAD with keep-alive, fixed-length
- * streamed bodies, nothing else. Other peers only ever send bodiless GET and HEAD requests.
+ * A small HTTP/1.1 server for the peer-to-peer API and the phone page: keep-alive, fixed-length
+ * streamed bodies (or, for event streams, a body that lasts until the connection closes), and
+ * request bodies with a Content-Length. Other peers only ever send bodiless GET and HEAD
+ * requests; the phone page posts small JSON bodies and the files it sends.
  */
 
 private const val TAG = "http"
 private const val IDLE_TIMEOUT_MS = 30_000
 private const val MAX_HEADER_BYTES = 16 * 1024
 private const val MAX_HEADERS = 100
+private const val MAX_SKIPPED_BODY = 64 * 1024 // a body nobody read: skipped to keep the connection, or the connection closes
 
 class HttpRequest(
     val method: String,
@@ -34,15 +37,64 @@ class HttpRequest(
     /** Header names in lower case; repeated headers joined with ", ". */
     val headers: Map<String, String>,
     val remoteAddress: String,
+    /** The request body: exactly Content-Length bytes (none without one). */
+    val body: InputStream = java.io.ByteArrayInputStream(ByteArray(0)),
+    val contentLength: Long = 0,
 ) {
     fun header(name: String): String? = headers[name.lowercase()]
+
+    /** A query parameter, percent-decoded. */
+    fun param(name: String): String? = query?.split('&')?.firstNotNullOfOrNull { pair ->
+        val eq = pair.indexOf('=')
+        val key = if (eq >= 0) pair.substring(0, eq) else pair
+        if (decodeQuery(key) == name) decodeQuery(if (eq >= 0) pair.substring(eq + 1) else "") else null
+    }
+
+    /** A small body (JSON), or null if it is longer than [limit]. */
+    fun readBody(limit: Int = 64 * 1024): ByteArray? = if (contentLength > limit) null else body.readBytes()
+}
+
+private fun decodeQuery(text: String): String = try {
+    java.net.URLDecoder.decode(text, "UTF-8")
+} catch (e: IllegalArgumentException) {
+    text
 }
 
 abstract class HttpBody {
+    /** The length in bytes, or -1 for a body that lasts until the connection closes (an event stream). */
     abstract val length: Long
 
     /** Writes exactly [length] bytes, or throws (then the connection is closed mid-response). */
     abstract fun writeTo(out: OutputStream)
+}
+
+/** Reads at most [remaining] bytes of a connection: one request's body. */
+private class BodyStream(private val input: InputStream, var remaining: Long) : InputStream() {
+    override fun read(): Int {
+        if (remaining <= 0) return -1
+        val b = input.read()
+        if (b < 0) throw IOException("the request body ended early")
+        remaining--
+        return b
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        if (remaining <= 0) return -1
+        val n = input.read(b, off, minOf(len.toLong(), remaining).toInt())
+        if (n < 0) throw IOException("the request body ended early")
+        remaining -= n
+        return n
+    }
+
+    override fun available(): Int = minOf(input.available().toLong(), remaining).toInt()
+
+    /** Skips what the handler didn't read. False if that is too much (then the connection closes). */
+    fun drain(): Boolean {
+        if (remaining > MAX_SKIPPED_BODY) return false
+        val buf = ByteArray(8192)
+        while (remaining > 0) if (read(buf) < 0) return false
+        return true
+    }
 }
 
 class BytesBody(private val bytes: ByteArray) : HttpBody() {
@@ -152,7 +204,9 @@ class HttpServer(private val handler: (HttpRequest) -> HttpResponse, private val
                     CoreLog.e(TAG, "error handling ${request.method} ${request.path}", e)
                     jsonError(500, "internal_error", "Internal error.")
                 }
-                val keepAlive = keepAliveRequested
+                // An unread body (a refused upload) is skipped if it is small; a big one ends the connection.
+                val bodyDone = (request.body as? BodyStream)?.let { body -> body.remaining == 0L || runCatching { body.drain() }.getOrDefault(false) } ?: true
+                val keepAlive = keepAliveRequested && bodyDone && response.body?.length != -1L
                 val ok = try {
                     send(output, request, response, keepAlive)
                 } finally {
@@ -162,6 +216,8 @@ class HttpServer(private val handler: (HttpRequest) -> HttpResponse, private val
             }
         } catch (e: IOException) {
             // the other side went away
+        } catch (e: Exception) { // never let one connection bring the app down
+            CoreLog.e(TAG, "a connection failed", e)
         } finally {
             connections.remove(client)
             runCatching { client.close() }
@@ -198,15 +254,15 @@ class HttpServer(private val handler: (HttpRequest) -> HttpResponse, private val
                 headers[name] = headers[name]?.let { "$it, $value" } ?: value
             }
             if (headers.containsKey("transfer-encoding")) throw BadRequest()
-            val bodyLength = headers["content-length"]?.toLongOrNull() ?: 0L
-            if (bodyLength < 0 || bodyLength > 64 * 1024) throw BadRequest()
-            skipFully(bodyLength) // nothing here takes a body
+            val bodyLength = headers["content-length"]?.let { it.toLongOrNull() ?: throw BadRequest() } ?: 0L
+            if (bodyLength < 0) throw BadRequest()
             val connection = headers["connection"]?.lowercase() ?: ""
             val keepAlive = if (version == "HTTP/1.0") "keep-alive" in connection else "close" !in connection
             val q = target.indexOf('?')
             val path = if (q >= 0) target.substring(0, q) else target
             val query = if (q >= 0) target.substring(q + 1) else null
-            return HttpRequest(method.uppercase(), path, query, headers, remote) to keepAlive
+            val body = BodyStream(input, bodyLength) // the handler reads it, or it is skipped after the response
+            return HttpRequest(method.uppercase(), path, query, headers, remote, body, bodyLength) to keepAlive
         }
 
         private fun readLine(firstLine: Boolean): String? {
@@ -226,26 +282,13 @@ class HttpServer(private val handler: (HttpRequest) -> HttpResponse, private val
                 sb.append(b.toChar()) // ISO-8859-1
             }
         }
-
-        private fun skipFully(n: Long) {
-            var left = n
-            while (left > 0) {
-                val skipped = input.skip(left)
-                if (skipped <= 0) {
-                    if (input.read() < 0) throw BadRequest()
-                    left--
-                } else {
-                    left -= skipped
-                }
-            }
-        }
     }
 
     /** Writes the response. False if the connection can't be used any more. */
     private fun send(out: OutputStream, request: HttpRequest, response: HttpResponse, keepAlive: Boolean): Boolean {
         val body = response.body
         val noBody = response.status == 304 || response.status == 204 || response.status < 200
-        val length = if (noBody) -1 else body?.length ?: 0
+        val length = if (noBody) -1 else body?.length ?: 0 // -1: no Content-Length (the body ends with the connection)
         writeHead(out, response, keepAlive, length)
         if (request.method == "HEAD" || noBody || body == null) {
             out.flush()
@@ -277,18 +320,24 @@ class HttpServer(private val handler: (HttpRequest) -> HttpResponse, private val
 
 fun reasonPhrase(status: Int): String = when (status) {
     200 -> "OK"
+    201 -> "Created"
     204 -> "No Content"
     206 -> "Partial Content"
+    303 -> "See Other"
     304 -> "Not Modified"
+    307 -> "Temporary Redirect"
     400 -> "Bad Request"
     401 -> "Unauthorized"
     403 -> "Forbidden"
     404 -> "Not Found"
     405 -> "Method Not Allowed"
     409 -> "Conflict"
+    413 -> "Content Too Large"
     416 -> "Range Not Satisfiable"
     500 -> "Internal Server Error"
+    502 -> "Bad Gateway"
     503 -> "Service Unavailable"
+    507 -> "Insufficient Storage"
     else -> "Status"
 }
 

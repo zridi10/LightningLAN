@@ -76,6 +76,18 @@ kotlin {
     }
 }
 
+// The phone page another phone opens from the app's QR code (core's PhoneApi.kt) is the desktop
+// app's own: its files are copied from lightninglan/static into the app's assets, under static/.
+val phonePageDir = layout.buildDirectory.dir("generated/phonePage")
+val phonePage = tasks.register<Sync>("phonePageAssets") {
+    from(rootProject.file("../lightninglan/static")) {
+        include("phone.html", "phone.js", "play.js", "blocks.js", "style.css", "favicon.svg", "themes/*.svg")
+    }
+    into(phonePageDir.map { it.dir("static") })
+}
+android.sourceSets["main"].assets.srcDir(phonePageDir)
+tasks.named("preBuild") { dependsOn(phonePage) }
+
 dependencies {
     implementation(project(":core"))
 

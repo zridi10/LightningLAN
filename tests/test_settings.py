@@ -42,6 +42,17 @@ def test_settings_are_local_only(peer):
     assert r.status_code == 403
 
 
+def test_the_tutorial_plays_by_itself_once(peer):
+    assert peer.get("/api/status").json()["tutorial_due"] is True  # a new config: the first run
+    assert peer.post("/api/tutorial/seen").status_code == 403  # local UI only, with the client header
+    assert peer.post("/api/tutorial/seen", client=LAN_CLIENT, headers=UI).status_code == 403
+    r = peer.post("/api/tutorial/seen", headers=UI)
+    assert r.status_code == 200, r.text
+    assert peer.get("/api/status").json()["tutorial_due"] is False
+    assert "tutorial_due" not in config_of(peer)
+    assert peer.post("/api/tutorial/seen", headers=UI).status_code == 200  # again: nothing changes
+
+
 def test_rename(peer):
     peer.scan()
     before = peer.get("/api/files", client=LAN_CLIENT).json()

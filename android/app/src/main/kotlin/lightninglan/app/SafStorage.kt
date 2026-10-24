@@ -14,14 +14,21 @@ import lightninglan.core.DownloadFolder
 import lightninglan.core.PARTIAL_DIR_NAME
 import lightninglan.core.PartialFile
 import lightninglan.core.PathReadable
+import lightninglan.core.ReceivedFile
 import lightninglan.core.ReadableFile
 import lightninglan.core.SavedFile
+import lightninglan.core.ShareInbox
 import lightninglan.core.ShareTree
 import lightninglan.core.TreeEntry
+import lightninglan.core.UPLOAD_TEMP_PREFIX
+import lightninglan.core.copyExactly
 import lightninglan.core.numberedNames
+import lightninglan.core.randomToken
+import lightninglan.core.receiveInto
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.file.Files
 
@@ -115,12 +122,38 @@ fun treeFolder(tree: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(tre
 
 /**
  * Shares a folder (a picked one, or one of the app's own on a plain path) and, at its top level,
- * the files picked one by one ([links]).
+ * the files picked one by one ([links]). Files sent from the phone page go into the folder.
  */
-class PhoneShareTree(private val context: Context, private val folder: Uri?, private val links: List<Uri>) : ShareTree {
+class PhoneShareTree(private val context: Context, private val folder: Uri?, private val links: List<Uri>) : ShareTree, ShareInbox {
     private val resolver = context.contentResolver
     private val dir: File? = folder?.localFolder()
     override val id: String = "saf:" + (folder?.toString() ?: "")
+
+    override fun receive(fileName: String, length: Long, mtimeMs: Long?, input: InputStream): ReceivedFile {
+        dir?.let { return receiveInto(it, fileName, length, mtimeMs, input) }
+        val parent = folder ?: throw IOException("there is no shared folder")
+        // Under a hidden name until it is all there (the index skips it), then renamed: the provider
+        // picks "name (1).ext" if the name is taken. A picked folder can't keep the file's date.
+        val temp = DocumentsContract.createDocument(resolver, parent, "application/octet-stream", UPLOAD_TEMP_PREFIX + randomToken(12) + ".tmp")
+            ?: throw IOException("could not make a file in the shared folder")
+        try {
+            (resolver.openOutputStream(temp, "w") ?: throw IOException("could not write to the shared folder")).use { copyExactly(input, it, length) }
+            val saved = DocumentsContract.renameDocument(resolver, temp, fileName) ?: temp
+            val name = displayName(saved) ?: fileName
+            return ReceivedFile(name, length, name != fileName)
+        } catch (e: Exception) {
+            runCatching { DocumentsContract.deleteDocument(resolver, temp) }
+            throw e as? IOException ?: IOException(e.message, e)
+        }
+    }
+
+    override fun inboxFreeSpace(): Long? = dir?.usableSpace?.takeIf { it > 0 }
+
+    private fun displayName(document: Uri): String? = try {
+        resolver.query(document, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (e: Exception) {
+        null
+    }
 
     override fun list(directoryKey: String?): List<TreeEntry>? {
         if (directoryKey != null) {

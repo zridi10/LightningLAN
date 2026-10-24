@@ -248,7 +248,12 @@ internal fun PlayPanel(sharing: Sharing, play: PlayView?, online: Boolean, paddi
                 Note("Nobody to play yet. Games need the latest LightningLAN on the other computer or phone, on the same Wi-Fi.")
             }
         }
-        items(GAME_TITLES.keys.toList(), key = { "k$it" }) { kind -> KindCard(sharing, kind, play.opponents, online) { openId = it } }
+        items(GAME_TITLES.keys.toList(), key = { "k$it" }) { kind ->
+            // The first one is what the tutorial points at.
+            Box(if (kind == GAME_TITLES.keys.first()) Modifier.tutorialTarget("games") else Modifier) {
+                KindCard(sharing, kind, play.opponents, online) { openId = it }
+            }
+        }
     }
 }
 

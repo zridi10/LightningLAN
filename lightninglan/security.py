@@ -163,8 +163,7 @@ class AccessControlMiddleware:
         if path != "/phone":  # the page itself is open: it tells an unpaired phone how to connect
             key = cookie_parser(headers.get("cookie", "")).get(PHONE_COOKIE)
             if not self.phone_key_ok(key):
-                await _reject(send, 401, "not_paired",
-                              "Scan the QR code in LightningLAN on the computer to connect this phone.")
+                await _reject(send, 401, "not_paired", "Scan the QR code in LightningLAN to connect this phone.")
                 return
         if method == "POST":
             origin = headers.get("origin")

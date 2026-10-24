@@ -58,12 +58,27 @@ class AppSettings(context: Context) {
         get() = prefs.getString("theme", null) ?: "synthwave"
         set(value) = prefs.edit().putString("theme", value).apply()
 
+    /** The secret in the phone page's QR code; a new one disconnects every phone. */
+    var phoneKey: String?
+        get() = prefs.getString("phone_key", null)
+        set(value) = prefs.edit().putString("phone_key", value).apply()
+
     /** The best score in the solo falling-blocks game. */
     var blocksBest: Int
         get() = prefs.getInt("blocks_best", 0)
         set(value) = prefs.edit().putInt("blocks_best", value).apply()
 
     val setupDone: Boolean get() = shareFolder != null && downloadsFolder != null
+
+    /** The tutorial plays by itself once, after the first setup; Settings can show it again. */
+    var tutorialDue: Boolean
+        get() = prefs.getBoolean("tutorial_due", false)
+        set(value) = prefs.edit().putBoolean("tutorial_due", value).apply()
+
+    init {
+        // A new install gets the tutorial; someone who set the app up before it existed doesn't need it.
+        if (!prefs.contains("tutorial_due")) tutorialDue = !setupDone
+    }
 
     private companion object {
         val PEER_ID_RE = Regex("^[0-9a-f]{32}$")

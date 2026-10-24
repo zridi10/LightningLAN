@@ -39,6 +39,10 @@ class NodeConfig(
     val nameGenerated: Boolean = false,
     val refreshMs: Long = 3_000,
     val indexIntervalMs: Long = 10_000,
+    /** The secret in the phone page's QR code (null: made the first time it is asked for). */
+    val phoneKey: String? = null,
+    /** The phone page's files; without them there is no phone page. */
+    val phonePage: PhonePageFiles? = null,
 )
 
 data class NodeStatus(
@@ -51,6 +55,8 @@ data class NodeStatus(
     val peersOnline: Int,
     val uploadedBytes: Long,
     val passphrase: Boolean,
+    /** Phone pages open right now (phones that scanned the QR code). */
+    val phones: Int,
 )
 
 class Node(
@@ -88,7 +94,29 @@ class Node(
     )
     val uploads = UploadLimiter()
     val arcade = Arcade(peerId, { name }, auth, peers, config.refreshMs, http)
-    private val server = HttpServer(LanApi(this)::handle)
+
+    /** For files the phone page downloads from other peers (PhoneApi.kt). */
+    internal val relayHttp: OkHttpClient = http.newBuilder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+    internal val phonePage: PhonePageFiles? = config.phonePage
+    private val server = HttpServer(LanApi(this, PhoneApi(this))::handle)
+
+    @Volatile
+    private var phoneKey: String? = config.phoneKey
+
+    /** Gets a new phone key (for the app to remember). */
+    @Volatile
+    var onPhoneKey: ((String) -> Unit)? = null
+    private val openPhones = java.util.concurrent.atomic.AtomicInteger()
+
+    /** Bumps when a phone page opens or closes. */
+    @Volatile
+    var phonesVersion = 0
+        private set
+
+    /** Closed for good: event streams to phone pages end. */
+    @Volatile
+    var closed = false
+        private set
 
     // Online: sharing and downloading. Offline: hidden from peers, transfers stopped.
     @Volatile
@@ -118,6 +146,9 @@ class Node(
     @Volatile
     private var commonCache: Pair<Any, List<CommonFile>>? = null
 
+    @Volatile
+    private var commonJsonCache: Triple<List<CommonFile>, ByteArray, String>? = null
+
     /** Starts listening and indexing, then joins the network. */
     @Throws(IOException::class)
     fun start() {
@@ -143,6 +174,7 @@ class Node(
             if (closing) return
             closing = true
         }
+        closed = true
         if (online) {
             try {
                 discovery?.stop() // say goodbye before anything else goes away
@@ -279,12 +311,89 @@ class Node(
         return files
     }
 
+    /** ThunderCLOUD as the phone page reads it (lightninglan/node.py's common_payload): JSON and an ETag. */
+    fun commonPayload(): Pair<ByteArray, String> {
+        val files = commonFiles()
+        commonJsonCache?.let { if (it.first === files) return it.second to it.third }
+        val body = buildJsonObject {
+            put("self", buildJsonObject {
+                put("peer_id", peerId)
+                put("name", name)
+            })
+            put("peers_online", peers.online().size)
+            put("indexing_pending", indexer.snapshot.pending)
+            put("files", buildJsonArray {
+                for (f in files) {
+                    add(buildJsonObject {
+                        put("id", f.id)
+                        put("name", f.name)
+                        put("size", f.size)
+                        put("mtime", f.mtime)
+                        put("local", f.local)
+                        put("sources", buildJsonArray {
+                            for (s in f.sources) {
+                                add(buildJsonObject {
+                                    put("peer_id", s.peerId)
+                                    put("name", s.name)
+                                    put("file_name", s.fileName)
+                                    put("self", s.self)
+                                })
+                            }
+                        })
+                        put("aliases", buildJsonArray { for (a in f.aliases) add(a) })
+                    })
+                }
+            })
+        }.toString().toByteArray(Charsets.UTF_8)
+        val etag = "\"" + sha256Hex(body).take(32) + "\""
+        commonJsonCache = Triple(files, body, etag)
+        return body to etag
+    }
+
     fun status(): NodeStatus {
         val snap = indexer.snapshot
         return NodeStatus(
             online, offlineReason, name, port, snap.entries.size, snap.pending, peers.online().size, uploads.sent.get(), auth.enabled,
+            openPhones.get(),
         )
     }
+
+    // ----- phones (the phone page, opened from the QR code in the app) ------------------------------------
+
+    /**
+     * The secret in the phone page's link: made the first time it is asked for and kept by the app
+     * (see [onPhoneKey]), so phones stay connected. [new] replaces it, which disconnects every phone.
+     */
+    @Synchronized
+    fun ensurePhoneKey(new: Boolean = false): String {
+        phoneKey?.let { if (!new) return it }
+        val key = randomToken(18)
+        phoneKey = key
+        onPhoneKey?.invoke(key)
+        CoreLog.i(TAG, if (new) "new phone key: phones connected before must scan the QR code again" else "made the phone key")
+        return key
+    }
+
+    fun phoneKeyMatches(key: String?): Boolean {
+        val stored = phoneKey
+        if (stored == null || key == null) return false
+        return java.security.MessageDigest.isEqual(stored.toByteArray(Charsets.UTF_8), key.toByteArray(Charsets.UTF_8))
+    }
+
+    internal fun phoneOpened() {
+        val n = openPhones.incrementAndGet()
+        phonesVersion++
+        CoreLog.i(TAG, "a phone connected ($n connected)")
+    }
+
+    internal fun phoneClosed() {
+        val n = openPhones.decrementAndGet()
+        phonesVersion++
+        CoreLog.i(TAG, "a phone disconnected ($n connected)")
+    }
+
+    /** Where files sent from the phone page go: the shared folder, if it can take them. */
+    fun shareInbox(): ShareInbox? = indexer.tree as? ShareInbox
 
     // ----- settings ----------------------------------------------------------------------------
 

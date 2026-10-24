@@ -2,6 +2,7 @@ package lightninglan.core
 
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -23,7 +24,7 @@ class PathReadable(file: File) : ReadableFile {
     override fun close() = raf.close()
 }
 
-class PathShareTree(private val root: File) : ShareTree {
+class PathShareTree(private val root: File) : ShareTree, ShareInbox {
     override val id: String = root.absolutePath
 
     override fun list(directoryKey: String?): List<TreeEntry>? {
@@ -35,6 +36,32 @@ class PathShareTree(private val root: File) : ShareTree {
     }
 
     override fun open(key: String): ReadableFile? = File(key).takeIf { it.isFile }?.let(::PathReadable)
+
+    override fun receive(fileName: String, length: Long, mtimeMs: Long?, input: InputStream): ReceivedFile =
+        receiveInto(root, fileName, length, mtimeMs, input)
+
+    override fun inboxFreeSpace(): Long? = root.usableSpace.takeIf { it > 0 }
+}
+
+/** Saves a file sent from the phone page in [dir]: under a hidden name until it is all there, then moved into place. */
+fun receiveInto(dir: File, fileName: String, length: Long, mtimeMs: Long?, input: InputStream): ReceivedFile {
+    if (!dir.isDirectory && !dir.mkdirs()) throw IOException("could not make the folder $dir")
+    val temp = File(dir, UPLOAD_TEMP_PREFIX + randomToken(12) + ".tmp")
+    try {
+        temp.outputStream().use { copyExactly(input, it, length) }
+        if (mtimeMs != null) temp.setLastModified(mtimeMs)
+        for (name in numberedNames(fileName).take(10_000)) {
+            try {
+                Files.move(temp.toPath(), File(dir, name).toPath())
+            } catch (e: FileAlreadyExistsException) {
+                continue
+            }
+            return ReceivedFile(name, length, name != fileName)
+        }
+        throw IOException("could not find a free name for $fileName in $dir")
+    } finally {
+        temp.delete() // only still there if it failed
+    }
 }
 
 class PathPartial(file: File) : PartialFile {

@@ -22,12 +22,14 @@ import lightninglan.core.DownloadView
 import lightninglan.core.Node
 import lightninglan.core.NodeConfig
 import lightninglan.core.NodeStatus
+import lightninglan.core.PhoneLink
 import lightninglan.core.PlayError
 import lightninglan.core.PlayView
 import lightninglan.core.GameView
 import lightninglan.core.STOPPED
 import lightninglan.core.deriveKey
 import lightninglan.core.numberedNames
+import lightninglan.core.phoneLinks
 import lightninglan.core.randomName
 import lightninglan.core.safeLocalFilename
 import java.io.File
@@ -59,6 +61,8 @@ data class UiSnapshot(
     val addresses: List<String>,
     /** While you wait: games, invitations and who can play. Null until sharing starts. */
     val play: PlayView?,
+    /** This phone's own Wi-Fi, for phones with no Wi-Fi in common (Hotspot.kt). */
+    val hotspot: HotspotState,
 )
 
 /**
@@ -91,6 +95,9 @@ class Sharing(private val app: Application) {
     @Volatile
     private var stoppedByPerson = false
 
+    /** This phone's own Wi-Fi network, when there's none in common with the other phones. */
+    private val hotspot = Hotspot(app) {}
+
     // ----- sharing on and off ------------------------------------------------------------------
 
     /** The app came to the front: share, unless Stop was pressed. */
@@ -106,6 +113,7 @@ class Sharing(private val app: Application) {
 
     fun stop() {
         stoppedByPerson = true
+        hotspot.stop() // nothing to reach through it any more
         control.execute { node?.goOffline(STOPPED) }
         app.stopService(Intent(app, SharingService::class.java))
     }
@@ -136,12 +144,15 @@ class Sharing(private val app: Application) {
             port = PORT,
             passphraseKey = settings.passphraseKey,
             nameGenerated = settings.nameGenerated,
+            phoneKey = settings.phoneKey,
+            phonePage = AssetPhonePage(app),
         )
         return Node(config, tree, settings.downloadsFolder?.let(::downloadFolderAt), NsdDiscovery(app)).also {
             it.onRenamed = { name -> // another device had the same made-up name
                 settings.name = name
                 settings.nameGenerated = true
             }
+            it.onPhoneKey = { key -> settings.phoneKey = key }
         }
     }
 
@@ -166,12 +177,13 @@ class Sharing(private val app: Application) {
                 ?: emptyList(),
             linked = entries.filter { it.key.startsWith("link:") }.map { it.sha256 }.toSet(),
             busy = busy,
-            onWifi = onLocalNetwork(),
+            onWifi = onLocalNetwork() || phoneAddresses().isNotEmpty(), // this phone's own hotspot counts too
             problem = problem,
             shareFolder = settings.shareFolder?.let(::folderLabel),
             downloadsFolder = settings.downloadsFolder?.let(::folderLabel),
             addresses = localAddresses(),
             play = n?.arcade?.view(),
+            hotspot = hotspot.state,
         )
     }
 
@@ -253,6 +265,30 @@ class Sharing(private val app: Application) {
 
     /** Invitations waiting for an answer (for the notification while the app is in the background). */
     fun openInvites() = node?.arcade?.view()?.invites ?: emptyList()
+
+    // ----- other phones, in their browsers (the phone page) -----------------------------------------
+
+    /**
+     * The phone page's link (and QR code) at each of this phone's Wi-Fi addresses, for [done] on the
+     * main thread; none until sharing has started once. [newKey] disconnects every phone first.
+     */
+    fun phoneLinks(newKey: Boolean = false, done: (List<PhoneLink>) -> Unit) = control.execute {
+        val n = node
+        val links = if (n == null) {
+            emptyList()
+        } else {
+            val key = n.ensurePhoneKey(new = newKey)
+            val onHotspot = (hotspot.state as? HotspotState.On)?.address
+            phoneLinks(phoneAddresses().sortedBy { it != onHotspot }, n.port, key) // the hotspot's address first
+        }
+        main.post { done(links) }
+        if (newKey && n != null) toast("Phones disconnected. The QR code is new.")
+    }
+
+    /** Makes this phone's own Wi-Fi. On the main thread, with the app on screen and [hotspotPermissions] granted. */
+    fun startHotspot() = hotspot.start()
+
+    fun stopHotspot() = hotspot.stop()
 
     // ----- this phone's files -------------------------------------------------------------------
 

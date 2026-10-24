@@ -2,6 +2,8 @@ package lightninglan.core
 
 import java.io.Closeable
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
 
 /*
@@ -31,6 +33,37 @@ interface ShareTree {
     fun list(directoryKey: String?): List<TreeEntry>?
 
     fun open(key: String): ReadableFile?
+}
+
+/** What a file sent from the phone page was saved as: its name in the shared folder, and whether that is a new one. */
+class ReceivedFile(val name: String, val size: Long, val renamed: Boolean)
+
+/** A shared folder that the phone page can send files into. */
+interface ShareInbox {
+    /**
+     * Saves exactly [length] bytes of [input] at the top of the shared folder as [fileName], or as
+     * "name (1).ext" and so on if that is taken (never replacing a file). Nothing is left if it fails.
+     */
+    @Throws(IOException::class)
+    fun receive(fileName: String, length: Long, mtimeMs: Long?, input: InputStream): ReceivedFile
+
+    /** Bytes free in the shared folder, or null if unknown. */
+    fun inboxFreeSpace(): Long?
+}
+
+/** Hidden while a file sent from the phone page arrives (the index skips names starting with a dot). */
+const val UPLOAD_TEMP_PREFIX = ".lightninglan-upload-"
+
+/** Copies exactly [length] bytes; fails if [input] ends sooner. */
+fun copyExactly(input: InputStream, output: OutputStream, length: Long) {
+    val buf = ByteArray(256 * 1024)
+    var left = length
+    while (left > 0) {
+        val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+        if (n < 0) throw IOException("the file ended early")
+        output.write(buf, 0, n)
+        left -= n
+    }
 }
 
 /** A download in progress, written piece by piece in any order. */

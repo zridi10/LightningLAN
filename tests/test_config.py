@@ -76,6 +76,21 @@ def test_made_up_names_are_marked_so_they_can_give_way(tmp_path):
         assert load_settings(cfg).name_generated is generated
 
 
+def test_the_tutorial_is_due_on_the_first_run_only(tmp_path):
+    cfg = tmp_path / "c.json"
+    assert load_settings(cfg, share=tmp_path / "s", downloads=tmp_path / "d").tutorial_due
+    assert json.loads(cfg.read_text())["tutorial_due"] is True
+    assert load_settings(cfg).tutorial_due  # not shown yet (the page wasn't opened): still due
+    data = json.loads(cfg.read_text())
+    del data["tutorial_due"]  # what the web UI's "seen" does
+    cfg.write_text(json.dumps(data))
+    assert not load_settings(cfg).tutorial_due
+    assert "tutorial_due" not in json.loads(cfg.read_text())
+    # Configs from before the tutorial: someone who already uses LightningLAN doesn't get it by itself.
+    cfg.write_text(json.dumps({"name": "Den PC", "share_dir": str(tmp_path / "s"), "downloads_dir": str(tmp_path / "d")}))
+    assert not load_settings(cfg).tutorial_due
+
+
 def test_random_name_avoids_names_in_use():
     taken = FUNNY_NAMES[:-1]
     assert random_name(taken) == FUNNY_NAMES[-1]

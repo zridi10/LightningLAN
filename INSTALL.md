@@ -75,15 +75,52 @@ once.
    your files: allow both. It makes **Shared** and **Downloads** folders in the phone's
    **Download/LightningLAN** folder and starts sharing right away, with a notification while it
    runs. **Stop**, in the app or in the notification, ends it.
+4. A short tutorial shows you the main buttons, the first time only. **Settings** → **Show the
+   tutorial** plays it again.
 
 A new version installs over the old one the same way. If you installed a LightningLAN app you
 built yourself, uninstall that first.
+
+**Sharing with a phone that doesn't have the app** (an iPhone, say): tap the phone button at the
+top of LightningLAN and let the other phone scan the QR code with its camera. It then uses
+LightningLAN in its browser, through your phone: it can download what's in ThunderCLOUD, send you
+photos and play the games. Both phones need to be on the same Wi-Fi.
+
+**No Wi-Fi in common? Make a hotspot.** Your phone can make its own little Wi-Fi network for the
+other phone to join. It works with no internet and no cell service at all (no SIM needed), and it
+gives nobody internet.
+
+1. Tap the phone button, then **Make a hotspot**. The first time, Android asks you to allow
+   "Nearby devices" (Android 13 and later) or location (older versions, which also need Location
+   switched on). LightningLAN only uses it to start the hotspot; it never asks where you are.
+2. **Step 1** shows a QR code for the hotspot's Wi-Fi. The other phone scans it with its camera and
+   joins. (Or picks the Wi-Fi name shown underneath in its Wi-Fi settings and types the password.)
+3. **Step 2** shows the usual LightningLAN code. The other phone scans that one too. If it says the
+   Wi-Fi has no internet, choose to stay connected: LightningLAN doesn't need any.
+4. Tap **Stop hotspot** when you're done. A new hotspot usually gets a new name and password, so
+   scan step 1 again each time.
+
+Use the hotspot when:
+
+- there's no Wi-Fi at all: outdoors, on a trip, on a plane, or anywhere without signal;
+- the Wi-Fi keeps devices apart, which guest, hotel, café and event networks often do (you're on
+  the same Wi-Fi but the other phone can't connect);
+- you just want to pass something to one or two phones next to you.
+
+Skip it when everyone is already on the same working Wi-Fi, especially with computers: most phones
+leave their own Wi-Fi while they host a hotspot, so your phone can't reach the computers on that
+Wi-Fi until you stop it. A hotspot also uses more battery, and it only reaches about as far as
+the next room. Computers and other phones with the app can join the hotspot too (with its name and
+password); whether they find each other there by themselves depends on the phone, but a phone
+with the app can always use step 2 in its browser.
 
 ## 3. Using LightningLAN
 
 - **First start**: LightningLAN sets everything up for you. It creates a **LightningLAN** folder in
   your home folder with two folders inside, **Shared** and **Downloads**, and gives you a random
-  funny name. A welcome note on the page shows you where your shared folder is.
+  funny name. A short tutorial then points out the main buttons one by one: click **Next** to go
+  on, or **Skip tutorial**. You don't have to share or play anything. It only plays by itself
+  this once; **Settings** → **Show the tutorial** plays it again.
 - **Your name**: click the pencil next to your name at the top of the page, type a new one and
   press Enter. The dice button suggests another funny name. If someone else on the network got
   the same made-up name, one of you gets a new one by itself.
@@ -104,6 +141,8 @@ built yourself, uninstall that first.
   It works through this computer, so LightningLAN must be running here. **Disconnect phones**
   in the same window makes every phone scan a new code. If the phone can't connect, see
   section 4. Phones need the firewall to allow LightningLAN too, and guest Wi-Fi often blocks them.
+  The Android app has the same phone button at the top, so a phone with the app can do this
+  for an iPhone (or any phone) too.
 - **Settings**: click the gear icon at the top right of the page to change your name, your
   folders (use **Browse…** to pick one), the theme or the passphrase. Changes apply immediately.
 - **Passphrase (optional)**: if you set one, only computers using exactly the same passphrase

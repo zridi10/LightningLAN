@@ -5,7 +5,8 @@ itself, shares a folder (and single files) of its own, downloads from everyone, 
 swarm downloads and passes pieces on, and honours the passphrase. It speaks the same protocol as
 the desktop app, so phones and computers see each other's files in ThunderCLOUD.
 
-Android 8.0 (API 26) or newer. iPhones can use the desktop app's phone page in the browser instead.
+Android 8.0 (API 26) or newer. iPhones (and phones without the app) use the phone page in their
+browser instead, served by a computer running LightningLAN or by this app.
 To install it, download `LightningLAN-android.apk` from the
 [latest release](https://github.com/zridi10/LightningLAN/releases/latest) (see
 [INSTALL.md](../INSTALL.md#android)).
@@ -80,10 +81,33 @@ skipped when no such Python environment exists.
   lock and a Wi-Fi lock so computers can reach the phone with the screen off. **Stop** (in the
   app or the notification) leaves the network and ends the service.
 - The peer-to-peer server listens on port 8765 (or the next free one), like the desktop app.
+- **The phone page**: the same server serves the desktop app's phone page (`core/.../PhoneApi.kt`,
+  the same routes, cookie and checks as `lightninglan/server.py` and `security.py`), so a phone
+  without the app scans the QR code behind the phone button and uses LightningLAN in its browser
+  through this phone. The page's files are copied from `lightninglan/static` into the app's
+  assets at build time (`app/build.gradle.kts`), so the two never drift apart; the interop tests
+  check that the games reach the page in the desktop app's format. Files only other peers have
+  are relayed with their SHA-256 checked, files sent from the page go into the shared folder,
+  and the key is kept in the app's settings. The QR code is drawn from ZXing's encoder.
+- **The hotspot** (`Hotspot.kt`): for phones with no Wi-Fi in common, the phone dialog starts
+  Android's local-only hotspot (`WifiManager.startLocalOnlyHotspot`): no internet sharing, no
+  carrier check, no SIM needed. Android picks its name and a random password each time; the dialog
+  shows them as a `WIFI:` QR code (`wifiQrText` in core), then the phone page's code on the
+  hotspot's address (the address the phone didn't have before it started). It needs "Nearby
+  devices" on Android 13 and later (declared `neverForLocation`), or the location permission and
+  Location switched on before that. Android only starts one for the app on screen; the sharing
+  service keeps the process, and so the hotspot, running until **Stop hotspot**, **Stop** or the app
+  goes away. Most phones can't be on a Wi-Fi and host at once, so they leave their Wi-Fi meanwhile.
+  Other phones with the app and computers can join it too, but nothing yet helps them find each
+  other there if mDNS doesn't get through; the phone page always works.
 - **While you wait** (the second tab) has the desktop app's ten head-to-head games, played against
   computers and other phones alike (`core/.../Games.kt` and `Play.kt`, the same rules and records
   as `lightninglan/games.py` and `play.py`), and the solo Falling blocks game (`ui/BlocksGame.kt`).
   Invitations arriving while the app is closed show as notifications.
+- **The tutorial** (`ui/Tutorial.kt`) is the desktop app's tour, drawn in Compose: it dims the
+  screen and spotlights the buttons tagged with `Modifier.tutorialTarget(...)`, one step at a time,
+  and asks for a tap on the two tabs. It plays by itself once, after the first setup (a new
+  install; phones that had the app before it don't get it by themselves), and from Settings.
 - **Themes** are the desktop app's: the animated Synthwave (the default), Bliss and Deep Sea
   scenes (drawn in `ui/Scenes.kt` after `static/themes`), and plain light and dark, picked in
   Settings. With animations turned off in Android's settings, the scenes stand still.

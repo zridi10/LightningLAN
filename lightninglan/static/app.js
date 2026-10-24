@@ -151,11 +151,13 @@
     var summary = plural(s.shared_files, 'file') + ' shared';
     if (s.indexing_pending) summary += ' · indexing ' + plural(s.indexing_pending, 'file') + '…';
     $('share-summary').textContent = summary;
-    $('welcome').hidden = !(s.first_run && !welcomeDismissed());
-    $('welcome-share').textContent = s.share_dir;
-    $('welcome-name').textContent = s.name;
     renderSharing();
     renderPhones();
+    if (s.tutorial_due && !tutorialStarted) {  // the first run: once, then only from Settings
+      tutorialStarted = true;
+      api('POST', '/api/tutorial/seen').catch(function () {});
+      startTutorial();
+    }
   }
 
   // ----- your name, edited in place at the top ---------------------------------------------
@@ -363,15 +365,90 @@
     }
   }
 
-  // ----- first-run welcome ----------------------------------------------------------------
+  // ----- the tutorial (tutorial.js): plays by itself on the first run, and from Settings -------
 
-  function welcomeDismissed() {
-    try { return localStorage.getItem('lightninglan-welcome-dismissed') === '1'; } catch (e) { return false; }
+  var tutorialStarted = false;
+
+  function showTab(which) {  // play.js switches the tabs
+    var tab = $(which === 'play' ? 'tab-play' : 'tab-files');
+    if (tab.getAttribute('aria-selected') !== 'true') tab.click();
   }
 
-  function dismissWelcome() {
-    try { localStorage.setItem('lightninglan-welcome-dismissed', '1'); } catch (e) { /* private mode */ }
-    $('welcome').hidden = true;
+  function filesTab() { showTab('files'); }
+  function playTab() { showTab('play'); }
+
+  var TUTORIAL = [
+    {
+      title: 'Welcome to LightningLAN ⚡',
+      before: filesTab,
+      text: 'Share files with everyone on this Wi-Fi, straight from computer to computer, and play games while they ' +
+        'download. There’s nothing to set up. This one-minute tour shows you the main buttons; you won’t have to ' +
+        'share or play anything.'
+    },
+    {
+      target: '.me', title: 'This is you', before: filesTab,
+      text: function () {
+        var name = state.status ? state.status.name : 'a funny name';
+        return 'Everyone on the network sees you as ' + name + '. Click the pencil to change your name any time.';
+      }
+    },
+    {
+      target: '#peer-pill', title: 'Who’s here', before: filesTab,
+      text: 'How many other computers and phones running LightningLAN are on this Wi-Fi. They show up by themselves.'
+    },
+    {
+      target: '#drop-zone', title: 'Share files', before: filesTab,
+      text: 'Drop files or folders here, or copy them into your shared folder, and everyone sees them within seconds.'
+    },
+    {
+      target: '.table-wrap', title: 'ThunderCLOUD', before: filesTab,
+      text: 'Every file everyone shares, in one list. Click a heading to sort, filter by name or by who shares it, and ' +
+        'click Download next to a file to get it.'
+    },
+    {
+      target: function () { return $('downloads').closest('.card'); }, title: 'Downloads', before: filesTab,
+      text: 'What you download shows up here as it arrives: pause, resume or cancel it. Files are saved in your ' +
+        'Downloads folder.'
+    },
+    {
+      target: function () { return $('share-dir').closest('.card'); }, title: 'Your shared folder', before: filesTab,
+      text: 'Everyone running LightningLAN here can see what’s in this folder. Stop LightningLAN takes you off the ' +
+        'network until you start it again.'
+    },
+    {
+      target: '#phone-open', title: 'Phones', before: filesTab,
+      text: 'Click this for a QR code: a phone on the same Wi-Fi scans it and uses LightningLAN in its browser. Android ' +
+        'or iPhone, nothing to install.'
+    },
+    {
+      target: '#tab-play', title: 'While you wait', before: filesTab, click: true,
+      hint: 'Click the While you wait tab to have a look.',
+      text: 'Download taking a while? Play games against the others on the network.'
+    },
+    {
+      target: function () { return document.querySelector('#play .play-kind') || $('play'); }, title: 'Games',
+      before: playTab,
+      text: 'Every game has a card like this one: pick who to play and click Challenge, and they get an invitation. ' +
+        'Solo, at the top, has Falling blocks to play on your own.'
+    },
+    {
+      target: '#tab-files', title: 'Back to your files', before: playTab, click: true,
+      hint: 'Click the Files tab to go back.',
+      text: 'Invitations and games waiting for you show a badge on the While you wait tab.'
+    },
+    {
+      target: '#settings-open', title: 'Settings', before: filesTab,
+      text: 'Your name, folders, theme and an optional passphrase are in Settings, and so is this tutorial if you want ' +
+        'to see it again.'
+    },
+    {
+      title: 'You’re all set', before: filesTab,
+      text: 'That’s all there is to it. Have fun at the LAN party!'
+    }
+  ];
+
+  function startTutorial() {
+    window.LightningTutorial.start(TUTORIAL, { onEnd: filesTab });
   }
 
   // ----- settings -------------------------------------------------------------------------
@@ -1238,8 +1315,10 @@
     document.querySelectorAll('[data-pick]').forEach(function (b) {
       b.addEventListener('click', function () { pickFolder(b); });
     });
-    $('welcome-dismiss').addEventListener('click', dismissWelcome);
-    $('welcome-settings').addEventListener('click', function () { dismissWelcome(); openSettings(); });
+    $('set-tutorial').addEventListener('click', function () {
+      closeSettings();
+      startTutorial();
+    });
 
     document.querySelectorAll('#files th[data-sort] button').forEach(function (b) {
       b.addEventListener('click', function () { setSort(b.parentElement.dataset.sort); });

@@ -341,6 +341,12 @@ def create_app(node: Node) -> FastAPI:
         show = request.app.state.show_window
         return {"shown": bool(show is not None and show())}
 
+    @app.post("/api/tutorial/seen")
+    async def tutorial_seen() -> dict:
+        """The tutorial played (on the first run): it doesn't start by itself again."""
+        await node.tutorial_seen()
+        return {"ok": True}
+
     @app.post("/api/shutdown")
     async def shutdown(request: Request) -> dict:
         stop = request.app.state.request_shutdown

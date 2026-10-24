@@ -70,6 +70,7 @@ import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -135,15 +136,30 @@ fun App(sharing: Sharing, theme: AppTheme, onTheme: (AppTheme) -> Unit, tabReque
     }
     var screen by rememberSaveable { mutableStateOf("main") }
     val style = LocalAppStyle.current
-    Box(Modifier.fillMaxSize().background(if (style.scene) Color.Transparent else MaterialTheme.colorScheme.background)) {
-        ThemeScene(style)
-        when {
-            !snap.setupDone -> FirstRun(sharing, snap.problem)
-            screen == "settings" -> {
-                BackHandler { screen = "main" }
-                SettingsScreen(sharing, snap, theme, onTheme, onBack = { screen = "main" })
+    val tutorial = remember { Tutorial() }
+    LaunchedEffect(snap.setupDone) {
+        if (snap.setupDone && sharing.settings.tutorialDue) { // the first run: once, then only from Settings
+            delay(700) // the main screen first
+            sharing.settings.tutorialDue = false
+            screen = "main"
+            tutorial.start()
+        }
+    }
+    CompositionLocalProvider(LocalTutorial provides tutorial) {
+        Box(Modifier.fillMaxSize().background(if (style.scene) Color.Transparent else MaterialTheme.colorScheme.background)) {
+            ThemeScene(style)
+            when {
+                !snap.setupDone -> FirstRun(sharing, snap.problem)
+                screen == "settings" -> {
+                    BackHandler { screen = "main" }
+                    SettingsScreen(sharing, snap, theme, onTheme, onBack = { screen = "main" }, onTutorial = {
+                        screen = "main"
+                        tutorial.start()
+                    })
+                }
+                else -> MainScreen(sharing, snap, tabRequest, onSettings = { screen = "settings" })
             }
-            else -> MainScreen(sharing, snap, tabRequest, onSettings = { screen = "settings" })
+            if (snap.setupDone && screen == "main") TutorialOverlay(tutorial) { tabRequest.value = it }
         }
     }
 }
@@ -286,6 +302,7 @@ private fun MainScreen(
     var sort by rememberSaveable { mutableStateOf("name") }
     var sharer by rememberSaveable { mutableStateOf<String?>(null) } // a peer ID: only the files it shares
     var showPeers by remember { mutableStateOf(false) }
+    var showPhones by remember { mutableStateOf(false) }
     val shareFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) sharing.shareInPlace(uris)
     }
@@ -325,8 +342,19 @@ private fun MainScreen(
                     }
                 },
                 actions = {
-                    PeersPill(snap.peers.size, online) { showPeers = true }
-                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
+                    Box(Modifier.tutorialTarget("devices")) { PeersPill(snap.peers.size, online) { showPeers = true } }
+                    val phones = snap.status?.phones ?: 0
+                    IconButton(onClick = { showPhones = true }, modifier = Modifier.tutorialTarget("phones")) {
+                        BadgedBox(badge = { if (phones > 0) Badge { Text("$phones") } }) {
+                            Icon(
+                                AppIcons.Phone,
+                                contentDescription = if (phones > 0) "$phones ${if (phones == 1) "phone" else "phones"} connected" else "Use LightningLAN on another phone",
+                            )
+                        }
+                    }
+                    IconButton(onClick = onSettings, modifier = Modifier.tutorialTarget("settings")) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
                 },
             )
         },
@@ -335,12 +363,14 @@ private fun MainScreen(
                 NavigationBarItem(
                     selected = tab == "files",
                     onClick = { tab = "files" },
+                    modifier = Modifier.tutorialTarget("filesTab"),
                     icon = { Icon(AppIcons.Folder, contentDescription = null) },
                     label = { Text("Files") },
                 )
                 NavigationBarItem(
                     selected = tab == "play",
                     onClick = { tab = "play" },
+                    modifier = Modifier.tutorialTarget("playTab"),
                     icon = {
                         BadgedBox(badge = { waitingForYou(snap.play).takeIf { it > 0 }?.let { Badge { Text("$it") } } }) {
                             Icon(AppIcons.Gamepad, contentDescription = null)
@@ -359,10 +389,10 @@ private fun MainScreen(
             contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item(key = "status") { StatusCard(sharing, snap) }
+            item(key = "status") { Box(Modifier.tutorialTarget("status")) { StatusCard(sharing, snap) } }
             item(key = "share") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ThemedButton(onClick = { shareFiles.launch(arrayOf("*/*")) }) {
+                    ThemedButton(onClick = { shareFiles.launch(arrayOf("*/*")) }, modifier = Modifier.tutorialTarget("share")) {
                         Text("Share files")
                     }
                     Spacer(Modifier.width(12.dp))
@@ -387,7 +417,7 @@ private fun MainScreen(
                 SectionHeader("ThunderCLOUD", if (snap.files.size == 1) "1 file" else "${snap.files.size} files") {}
             }
             item(key = "tools") {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.tutorialTarget("search"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
@@ -437,6 +467,7 @@ private fun MainScreen(
         }
     }
     if (showPeers) PeersDialog(snap) { showPeers = false }
+    if (showPhones) PhonesDialog(sharing, snap) { showPhones = false }
 }
 
 @Composable
@@ -685,7 +716,14 @@ private fun downloadLine(d: DownloadView): String {
 // ----- settings --------------------------------------------------------------------------------
 
 @Composable
-private fun SettingsScreen(sharing: Sharing, snap: UiSnapshot, theme: AppTheme, onTheme: (AppTheme) -> Unit, onBack: () -> Unit) {
+private fun SettingsScreen(
+    sharing: Sharing,
+    snap: UiSnapshot,
+    theme: AppTheme,
+    onTheme: (AppTheme) -> Unit,
+    onBack: () -> Unit,
+    onTutorial: () -> Unit,
+) {
     val context = LocalContext.current
     var name by rememberSaveable { mutableStateOf(sharing.settings.name) }
     var savedName by remember { mutableStateOf(sharing.settings.name) }
@@ -731,6 +769,9 @@ private fun SettingsScreen(sharing: Sharing, snap: UiSnapshot, theme: AppTheme, 
                         )
                     }
                 }
+            }
+            Setting("Tutorial", "A quick tour of the main buttons, like the one on the first start.") {
+                OutlinedButton(onClick = onTutorial) { Text("Show the tutorial") }
             }
             Setting("Passphrase", "Only devices with the same passphrase see each other. Leave it empty to share with everyone on this Wi-Fi.") {
                 OutlinedTextField(

@@ -161,6 +161,13 @@ locations too.
   continues once a peer with the file is back.
 - **Peers**: everyone online with their file counts. Peers that were found but rejected (for
   example, a different passphrase) are listed separately with the reason.
+- **Tutorial**: on the first run, a guided tour dims the page and points out the main buttons one at
+  a time (your name, peers, sharing, ThunderCLOUD, downloads, the shared folder, phones, the games
+  tab and Settings), with **Next**, **Back** and **Skip tutorial**. Two steps ask for a click on the
+  real thing (the **While you wait** tab, then **Files**); nothing has to be shared or played. It
+  plays by itself once (the config file says `"tutorial_due": true` until the page has shown it)
+  and then only from **Settings** → **Show the tutorial**. The Android app has the same tour.
+  (`static/tutorial.js` runs it; the steps are in `app.js`.)
 - **Settings** (the gear icon): your name, the shared and downloads folders (with a
   **Browse…** button that opens the system's folder chooser), the theme and the passphrase. Changes apply
   immediately, without a restart. Peers see a new name within seconds. A new shared folder is
@@ -204,8 +211,10 @@ and a **Stop** button) until you stop it. Install `LightningLAN-android.apk` fro
 
 ### The phone page (any phone, in the browser)
 
-A phone can also join through a computer running LightningLAN, in the phone's own browser.
-There's no app to install, so Android and iPhone both work.
+A phone can also join through a computer running LightningLAN, or through a phone running the
+Android app, in the phone's own browser. There's no app to install, so Android and iPhone both
+work. A phone with the app can share with an iPhone this way, even with no computer around: both
+on the same Wi-Fi, or the iPhone on the Android phone's hotspot.
 
 1. On the computer, click the phone button at the top right. It shows a QR code (and the same
    link as text) for each network address the computer has.
@@ -226,6 +235,21 @@ new code. The key lives in the config file. Typing the computer's address
 
 The phone page isn't a full peer: it only downloads and sends through the computer, and only
 while that computer runs LightningLAN. On Android, the app does all of that by itself.
+
+The Android app serves the same page (the files from `lightninglan/static`, packed into the app)
+with the same API, key and rules (`android/core/.../PhoneApi.kt`): the phone button in its top
+bar shows the QR code, a badge counts the phones connected, and **Disconnect phones** makes a new
+key. Files sent from the page go into the app's shared folder, and the page plays the games as
+that phone.
+
+**No Wi-Fi in common: the hotspot.** With no Wi-Fi around, or one that keeps devices apart (guest,
+hotel and event networks often do), **Make a hotspot** in the same window has the phone make its
+own Wi-Fi with Android's local-only hotspot: no internet, no cell service and no data plan
+needed, and no internet for anyone on it. The window then shows two QR codes: one that joins the
+hotspot's Wi-Fi (phone cameras read those), then the phone page's link on the hotspot's address.
+It's for phones with nothing in common; when everyone is on a working Wi-Fi, stay on it, since
+most phones leave their own Wi-Fi while hosting and so lose the computers on it. See
+[INSTALL.md](INSTALL.md#android) for when to use which.
 
 ## While you wait
 
