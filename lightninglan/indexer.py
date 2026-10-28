@@ -255,7 +255,7 @@ class Indexer:
                                 continue
                             st = target.stat()
                         elif entry.is_dir(follow_symlinks=False):
-                            if not _is_junction(entry):
+                            if not is_junction(entry):
                                 stack.append((entry.path, rel + "/"))
                             continue
                         elif entry.is_file(follow_symlinks=False):
@@ -310,10 +310,10 @@ def _is_hidden_on_windows(entry: os.DirEntry) -> bool:
     return bool(attrs & _WIN_HIDDEN)
 
 
-def _is_junction(entry: os.DirEntry) -> bool:
-    is_junction = getattr(entry, "is_junction", None)  # Python 3.12+
-    if is_junction is not None:
-        return is_junction()
+def is_junction(entry: os.DirEntry) -> bool:
+    check = getattr(entry, "is_junction", None)  # Python 3.12+
+    if check is not None:
+        return check()
     if _REPARSE_MOUNT_POINT is None:
         return False
     return getattr(entry.stat(follow_symlinks=False), "st_reparse_tag", 0) == _REPARSE_MOUNT_POINT

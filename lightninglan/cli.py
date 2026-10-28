@@ -72,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MB_PER_S",
         help="limit your total upload to other peers, in megabytes per second",
     )
+    p.add_argument("--steam-dir", metavar="FOLDER", help="the Steam folder, if it isn't found by itself")
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
     p.add_argument("--no-tray", action="store_true", help="no tray icon and no pop-up messages (servers, scripts)")
     p.add_argument("--verbose", "-v", action="store_true", help="log requests and debug output")
@@ -124,6 +125,8 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
     )
     settings.open_browser = not args.no_browser
     settings.interfaces = args.interface
+    if args.steam_dir:
+        settings.steam_dir = Path(args.steam_dir).expanduser().absolute()
     if not 0.2 <= args.refresh_interval <= 60:
         raise ConfigError("--refresh-interval must be between 0.2 and 60 seconds")
     settings.refresh_interval = args.refresh_interval

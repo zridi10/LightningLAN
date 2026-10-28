@@ -28,7 +28,7 @@ from .phone import COOKIE as PHONE_COOKIE, COOKIE_MAX_AGE, hold_session, phone_l
 from .play import PlayError
 from .resources import static_dir
 from .security import AccessControlMiddleware, SecurityHeadersMiddleware
-from .serving import serve_download, serve_piece
+from .serving import serve_download, serve_game_file, serve_piece
 from .transfers import DownloadError
 from .uploads import receive_upload
 
@@ -76,6 +76,16 @@ class PlayMove(BaseModel):
     shuffle: bool = False  # battleship: place the ships somewhere else
     ready: bool = False  # battleship: lock the ships in
     time_ms: int | None = None  # typing race, math sprint
+
+
+class SteamShare(BaseModel):
+    on: bool
+
+
+class SteamGet(BaseModel):
+    appid: int
+    library: str | None = None  # one of the Steam libraries here; the one with the most space by default
+    peer_id: str | None = None
 
 
 class PickFolder(BaseModel):
@@ -183,6 +193,18 @@ def create_app(node: Node) -> FastAPI:
     def swarm_piece(file_id: str, index: int) -> Response:
         return serve_piece(node.downloads, file_id, index, node.uploads)
 
+    @app.get("/api/steam/{appid}")
+    def steam_file_list(appid: int, since: int = 0) -> Response:
+        """A shared Steam game's files with their SHA-256, from number `since` on (see steam.py)."""
+        payload = node.steam.file_list(appid, since)
+        if payload is None:
+            return JSONResponse({"error": "not_found", "detail": "This peer does not share that game."}, status_code=404)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/steam/{appid}/{path:path}")
+    def steam_file(appid: int, path: str, request: Request) -> Response:
+        return serve_game_file(node.steam, appid, path, request, node.uploads)
+
     # ----- local web UI -----------------------------------------------------------------
 
     @app.get("/", include_in_schema=False)
@@ -234,7 +256,7 @@ def create_app(node: Node) -> FastAPI:
 
     @app.get("/api/downloads")
     def list_downloads() -> dict:
-        return {"downloads": node.downloads.list()}
+        return {"downloads": node.all_downloads()}
 
     def require_online() -> None:
         if not node.online:
@@ -251,22 +273,26 @@ def create_app(node: Node) -> FastAPI:
     @app.post("/api/downloads/clear")
     def clear_downloads() -> dict:
         node.downloads.clear_finished()
-        return {"downloads": node.downloads.list()}
+        node.games.clear_finished()
+        return {"downloads": node.all_downloads()}
 
     @app.post("/api/downloads/pause-all")
     def pause_all_downloads() -> dict:
         node.downloads.pause_all()
-        return {"downloads": node.downloads.list()}
+        node.games.pause_all()
+        return {"downloads": node.all_downloads()}
 
     @app.post("/api/downloads/resume-all")
     def resume_all_downloads() -> dict:
         require_online()
         node.downloads.resume_all()
-        return {"downloads": node.downloads.list()}
+        node.games.resume_all()
+        return {"downloads": node.all_downloads()}
 
     @app.post("/api/downloads/{download_id}/{action}")
     def control_download(download_id: str, action: str) -> dict:
-        actions = {"pause": node.downloads.pause, "resume": node.downloads.resume, "cancel": node.downloads.cancel}
+        manager = node.games if node.games.owns(download_id) else node.downloads
+        actions = {"pause": manager.pause, "resume": manager.resume, "cancel": manager.cancel}
         if action not in actions:
             raise HTTPException(404, "unknown action")
         if action == "resume":
@@ -278,11 +304,34 @@ def create_app(node: Node) -> FastAPI:
 
     @app.delete("/api/downloads/{download_id}")
     def remove_download(download_id: str) -> dict:
+        manager = node.games if node.games.owns(download_id) else node.downloads
         try:
-            node.downloads.remove(download_id)
+            manager.remove(download_id)
         except DownloadError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
         return {"ok": True}
+
+    @app.get("/api/my-steam")
+    def my_steam() -> dict:
+        """Steam on this computer: found or not, shared or not, and its libraries with the space free."""
+        return node.steam_payload()
+
+    @app.post("/api/my-steam/share")
+    async def share_steam(body: SteamShare) -> dict:
+        try:
+            await node.set_steam_sharing(body.on)
+        except SettingsError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return node.steam_payload()
+
+    @app.post("/api/my-steam/get")
+    def get_game(body: SteamGet) -> dict:
+        """Get a Steam game another peer shares, into a Steam library here."""
+        require_online()
+        try:
+            return node.games.start(body.appid, body.library, body.peer_id).to_dict()
+        except DownloadError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
 
     @app.get("/api/settings")
     def get_settings() -> dict:
@@ -322,13 +371,14 @@ def create_app(node: Node) -> FastAPI:
             path, reveal = log_dir(node.settings.state_dir), False
             path.mkdir(parents=True, exist_ok=True)
         else:
+            game = node.games.owns(body.download_id or "")
             try:
-                d = node.downloads.get(body.download_id or "")
+                d = (node.games if game else node.downloads).get(body.download_id or "")
             except DownloadError as exc:
                 raise HTTPException(exc.status, str(exc)) from exc
-            if d.status != "completed" or not d.path or not Path(d.path).exists():
+            if not d.path or not Path(d.path).exists() or (d.status != "completed" and not game):
                 raise HTTPException(404, "The downloaded file is no longer there.")
-            path, reveal = Path(d.path), True
+            path, reveal = Path(d.path), not game  # a game: its folder
         try:
             open_in_file_manager(path, reveal)
         except OSError as exc:

@@ -65,12 +65,14 @@ class Settings:
     name_generated: bool = False
     # The web UI plays its tutorial by itself once: on the first run (and until it has been shown).
     tutorial_due: bool = False
+    steam_share: bool = False  # the Steam games installed here are shared (steam.py)
     # Runtime-only options (never written to the config file).
     interfaces: list[str] | None = None
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
     max_upload_rate: float | None = None  # bytes per second, all uploads together
     discovery: bool = True
     open_browser: bool = True
+    steam_dir: Path | None = None  # where Steam is, when it isn't found by itself
     first_run: bool = False  # no config file existed when this run started
 
     @property
@@ -200,6 +202,7 @@ def load_settings(
         first_run=first_run,
         name_generated=generated,
         tutorial_due=tutorial_due,
+        steam_share=data.get("steam_share") is True,
     )
 
     if save:

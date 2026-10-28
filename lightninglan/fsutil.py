@@ -46,6 +46,21 @@ def _try_move(src: Path, target: Path) -> bool:
     return True
 
 
+def long_path(path: Path | str) -> str:
+    r"""The path as Windows opens it even past 260 characters (the \\?\ form); unchanged elsewhere.
+
+    Games nest their files deep inside the Steam folder, and Windows refuses longer paths unless
+    long paths are turned on for the whole system.
+    """
+    text = str(path)
+    if sys.platform != "win32" or text.startswith("\\\\?\\"):
+        return text
+    text = os.path.abspath(text)
+    if text.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + text[2:]
+    return "\\\\?\\" + text
+
+
 def free_space(directory: Path) -> int | None:
     try:
         return shutil.disk_usage(directory).free

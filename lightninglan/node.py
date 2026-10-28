@@ -13,10 +13,11 @@ from pathlib import Path
 
 from . import __version__
 from .auth import Authenticator, derive_key
-from .common import merge_common_space
+from .common import merge_common_space, merge_games
 from .config import MAX_NAME_LENGTH, ConfigError, Settings, prepare_folder, update_config_file
 from .desktop import folder_picker_available
 from .discovery import Discovery
+from .fsutil import free_space
 from .indexer import Indexer
 from .logs import log_dir
 from .names import random_name
@@ -25,6 +26,8 @@ from .peers import PeerTable
 from .play import TITLES as GAME_TITLES, Arcade
 from .pieces import PieceInfo
 from .serving import UploadLimiter
+from .steam import STEAM_OS, SteamLibrary
+from .steamget import GameDownloads
 from .transfers import PAUSED, DownloadManager
 
 log = logging.getLogger(__name__)
@@ -51,6 +54,9 @@ class Node:
         self.peers = PeerTable(settings.peer_id, self.auth, settings.refresh_interval)
         self.peers.on_polled = self._check_name
         self.downloads = DownloadManager(settings.downloads_dir, self.auth, self.peers)
+        self.steam = SteamLibrary(settings.steam_dir, settings.state_dir / "steam_hash_cache.json",
+                                  sharing=settings.steam_share)
+        self.games = GameDownloads(self.steam, self.auth, self.peers)  # Steam games got from other peers
         self.arcade = Arcade(settings.peer_id, lambda: self.settings.name, self.auth, self.peers,
                              settings.refresh_interval)
         self.uploads = UploadLimiter(settings.max_upload_rate)
@@ -74,6 +80,7 @@ class Node:
         self._switching = asyncio.Lock()
         self._closing = False
         self._paused_by_stop: list[str] = []
+        self._games_paused_by_stop: list[str] = []
         self._ui_sessions = 0
         self._ui_timer: asyncio.Task | None = None
         self.phones = 0  # phone pages open right now
@@ -91,6 +98,8 @@ class Node:
 
     async def start(self) -> None:
         self.indexer.start()
+        await asyncio.to_thread(self.steam.scan)  # the first time before anyone asks
+        self.steam.start()
         await self.peers.start()
         await self.arcade.start()
         if self.discovery is not None:
@@ -107,9 +116,11 @@ class Node:
                 except Exception:
                     log.exception("stopping discovery failed")
             self.downloads.shutdown()
+            self.games.shutdown()
             await self.arcade.stop()
             await self.peers.stop()
             self.indexer.stop()
+            self.steam.stop()
 
     # ----- going offline and back (the Stop and Start buttons, closing the web UI) ----------
 
@@ -133,6 +144,7 @@ class Node:
                 except Exception:
                     log.exception("stopping discovery failed")
             self._paused_by_stop = await asyncio.to_thread(self.downloads.pause_all)
+            self._games_paused_by_stop = await asyncio.to_thread(self.games.pause_all)
             await self.arcade.stop()
             await self.peers.stop()
             self.peers.clear()
@@ -156,23 +168,28 @@ class Node:
             self.state_version += 1
             paused, self._paused_by_stop = self._paused_by_stop, []
             if paused:
-                self._spawn(self._resume_when_found(paused))
+                files = self.downloads
+                self._spawn(self._resume_when_found(files, paused, lambda d: files.sources(d.file_id)))
+            paused, self._games_paused_by_stop = self._games_paused_by_stop, []
+            if paused:
+                games = self.games
+                self._spawn(self._resume_when_found(games, paused, lambda d: games.sources(d.appid)))
             log.info("sharing again")
 
-    async def _resume_when_found(self, download_ids: list[str]) -> None:
-        # Peers take a moment to reappear: resume each download once a peer has its file again
-        # (or after RESUME_WAIT, so it can say that nobody has it).
+    async def _resume_when_found(self, manager, download_ids: list[str], has_sources) -> None:
+        # Peers take a moment to reappear: resume each download once a peer has its file (or game)
+        # again, or after RESUME_WAIT, so it can say that nobody has it.
         deadline = time.monotonic() + RESUME_WAIT
         waiting = list(download_ids)
         while waiting and self.online:
             give_up = time.monotonic() >= deadline
             for download_id in list(waiting):
-                d = self.downloads.find(download_id)
+                d = manager.find(download_id)
                 if d is None or d.status != PAUSED:
                     waiting.remove(download_id)  # removed, or resumed by hand
-                elif give_up or self.downloads.sources(d.file_id):
+                elif give_up or has_sources(d):
                     waiting.remove(download_id)
-                    await asyncio.to_thread(self.downloads.resume_all, [download_id])
+                    await asyncio.to_thread(manager.resume_all, [download_id])
             await asyncio.sleep(0.5)
 
     def ui_opened(self) -> None:
@@ -255,25 +272,26 @@ class Node:
     def files_payload(self) -> tuple[bytes, str]:
         """The JSON body and ETag for GET /api/files, cached per index and swarm version."""
         snap = self.indexer.snapshot
-        key = (snap.version, self.downloads.swarm_version)
+        key = (snap.version, self.downloads.swarm_version, self.steam.version)
         cached = self._files_cache
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
-        body = json.dumps(
-            {
-                "peer_id": self.peer_id,
-                "name": self.name,
-                "version": __version__,
-                "files": [entry.to_dict() for entry in snap.entries],
-                "indexing": {"pending": snap.pending},
-                # Its presence says we serve piece lists; the ids are files we can pass pieces of.
-                "swarm": self.downloads.swarm_files(),
-                "play": 1,  # serves GET /api/games: can play head-to-head games (LightningLAN 1.2+)
-                "games": list(GAME_TITLES),  # which ones
-                "name_auto": self.settings.name_generated,  # made-up names give way when two peers share one
-            },
-            separators=(",", ":"),
-        ).encode("utf-8")
+        payload = {
+            "peer_id": self.peer_id,
+            "name": self.name,
+            "version": __version__,
+            "files": [entry.to_dict() for entry in snap.entries],
+            "indexing": {"pending": snap.pending},
+            # Its presence says we serve piece lists; the ids are files we can pass pieces of.
+            "swarm": self.downloads.swarm_files(),
+            "play": 1,  # serves GET /api/games: can play head-to-head games (LightningLAN 1.2+)
+            "games": list(GAME_TITLES),  # which ones
+            "name_auto": self.settings.name_generated,  # made-up names give way when two peers share one
+        }
+        steam = self.steam.listing()
+        if steam is not None:
+            payload["steam"] = steam  # the Steam games shared, served from /api/steam/ (LightningLAN 1.6+)
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
         self._files_cache = (key, body, etag)
         return body, etag
@@ -284,18 +302,21 @@ class Node:
 
     def common_payload(self) -> tuple[bytes, str]:
         """The merged ThunderCLOUD as JSON plus an ETag, recomputed only when something changed."""
-        key = (self.indexer.snapshot.version, self.peers.version)
+        key = (self.indexer.snapshot.version, self.peers.version, self.steam.version)
         cached = self._common_cache
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
         online = self.peers.online()
         files = merge_common_space(self.peer_id, self.name, self.indexer.snapshot.entries, online)
+        games = merge_games(self.peer_id, self.name, STEAM_OS, self.steam.shared(), self.steam.installed, online)
         body = json.dumps(
             {
                 "self": {"peer_id": self.peer_id, "name": self.name},
                 "peers_online": len(online),
                 "indexing_pending": self.indexer.snapshot.pending,
                 "files": files,
+                "games": games,
+                "steam_found": self.steam.found,
             },
             separators=(",", ":"),
         ).encode("utf-8")
@@ -323,7 +344,46 @@ class Node:
             "first_run": self.settings.first_run,
             "tutorial_due": self.settings.tutorial_due,
             "phones": self.phones,
+            "steam": {
+                "found": self.steam.found,
+                "sharing": self.steam.sharing,
+                "shared": len(self.steam.shared()),
+                "installed": len(self.steam.installed),
+            },
         }
+
+    def all_downloads(self) -> list[dict]:
+        """Files and Steam games, newest first."""
+        items = self.downloads.list() + self.games.list()
+        return sorted(items, key=lambda d: d["created_at"], reverse=True)
+
+    # ----- Steam games (steam.py, steamget.py) --------------------------------------------------
+
+    def steam_payload(self) -> dict:
+        steam = self.steam
+        return {
+            "found": steam.found,
+            "sharing": steam.sharing,
+            "shared": len(steam.shared()),
+            "installed": len(steam.installed),
+            "libraries": [{"path": str(lib), "free": free_space(lib)} for lib in steam.libraries],
+        }
+
+    async def set_steam_sharing(self, on: bool) -> None:
+        """The Steam library share button: share the games installed here, or stop."""
+        if on and not self.steam.found:
+            raise SettingsError("Steam isn't installed on this computer.")
+        try:
+            await asyncio.to_thread(update_config_file, self.settings.config_path, {"steam_share": True if on else None})
+        except ConfigError as exc:
+            raise SettingsError(str(exc)) from exc
+        self.settings.steam_share = on
+        self.steam.set_sharing(on)
+        await asyncio.to_thread(self.steam.scan)
+        if on:
+            log.info("sharing %d Steam games", len(self.steam.shared()))
+        else:
+            log.info("stopped sharing Steam games")
 
     def peers_payload(self) -> dict:
         return {

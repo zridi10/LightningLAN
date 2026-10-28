@@ -187,6 +187,18 @@
         <button id="stop-sharing" class="text-btn danger" type="button">Stop LightningLAN</button>
         <button id="start-sharing" class="btn start-btn" type="button" hidden>Start LightningLAN</button>
       </section>
+
+      <section id="steam-card" class="card">
+        <div class="card-head"><h2>Your Steam games</h2></div>
+        <p id="steam-summary" class="muted small"></p>
+        <button id="steam-share" class="btn" type="button" hidden>
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.58 16.09l-1.09-7.66C20.21 6.46 18.52 5 16.53 5H7.47C5.48 5 3.79 6.46 3.51 8.43l-1.09 7.66C2.2 17.63 3.39 19 4.94 19c.68 0 1.32-.27 1.8-.75L9 16h6l2.25 2.25c.48.48 1.13.75 1.8.75 1.56 0 2.75-1.37 2.53-2.91zM11 11H9v2H8v-2H6v-1h2V8h1v2h2v1zm4-1c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm2 3c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
+          Share my Steam games
+        </button>
+        <button id="steam-unshare" class="text-btn danger" type="button" hidden>Stop sharing them</button>
+        <p class="muted small steam-help">Shared games show up in ThunderCLOUD, and anyone here can put them straight into
+          their own Steam library. To play one, they need to own it on Steam.</p>
+      </section>
     </aside>
   </main>
 
@@ -289,6 +301,27 @@
       <div class="dialog-actions">
         <button id="phone-new-key" class="text-btn danger" type="button">Disconnect phones</button>
         <button id="phone-close" class="btn" type="button">Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="steam-dialog" class="dialog" aria-labelledby="steam-title">
+    <div class="dialog-body">
+      <h2 id="steam-title">Get <span id="steam-game-name"></span></h2>
+      <p id="steam-game-info" class="muted small"></p>
+      <div class="field">
+        <label class="field-label" for="steam-library">Put it in</label>
+        <select id="steam-library" class="select"></select>
+        <span class="field-help">Your Steam library folders, with the space free in each.</span>
+      </div>
+      <p class="small">It's copied from the computers here that share it, straight into Steam's own folders. When it's
+        done, start Steam (or restart it if it's open) and the game is in your library.</p>
+      <p class="muted small">To play it, you need to own it on Steam. If their copy isn't the latest version, Steam
+        updates it.</p>
+      <p id="steam-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button id="steam-cancel" type="button" class="btn secondary">Cancel</button>
+        <button id="steam-get" type="button" class="btn">Get it</button>
       </div>
     </div>
   </dialog>

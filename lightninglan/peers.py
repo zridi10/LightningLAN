@@ -27,9 +27,11 @@ MAX_FAILURES = 3
 MAX_INDEX_BYTES = 64 * 1024 * 1024
 MAX_FILES_PER_PEER = 200_000
 MAX_SWARM_FILES = 10_000
+MAX_STEAM_GAMES = 5_000
 OFFLINE_RETRY_INTERVAL = 10.0
 IGNORED_RETRY_INTERVAL = 30.0
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_STEAM_OS_RE = re.compile(r"^[a-z]{1,16}$")
 
 PENDING, ONLINE, OFFLINE, IGNORED = "pending", "online", "offline", "ignored"
 
@@ -44,6 +46,17 @@ class RemoteFile:
     name: str  # relative path exactly as the peer reported it (untrusted)
     size: int
     mtime: float
+
+
+@dataclass(frozen=True)
+class RemoteGame:
+    """A Steam game another peer shares (see steam.py)."""
+
+    appid: int
+    name: str  # cleaned up for showing
+    size: int
+    buildid: str
+    updated: int
 
 
 @dataclass
@@ -68,6 +81,8 @@ class Peer:
     play: bool = False  # plays head-to-head games (LightningLAN 1.2+)
     games: frozenset[str] | None = None  # which ones (None: the first three, from before it said)
     name_auto: bool = False  # its name was made up by LightningLAN (1.3+), so it gives way when names clash
+    steam_os: str | None = None  # the kind of computer its Steam games are for (1.6+)
+    steam_games: tuple[RemoteGame, ...] = ()
 
     @property
     def online(self) -> bool:
@@ -90,6 +105,7 @@ class Peer:
             "files": len(self.files),
             "total_size": sum(f.size for f in self.files),
             "indexing": self.indexing,
+            "steam_games": len(self.steam_games),
             "last_seen": self.last_seen,
             "last_error": self.last_error,
             "reason": self.ignore_reason,
@@ -102,6 +118,33 @@ def parse_swarm(payload: dict) -> tuple[bool, frozenset[str]]:
     if not isinstance(raw, list):
         return False, frozenset()
     return True, frozenset(x for x in raw[:MAX_SWARM_FILES] if isinstance(x, str) and _SHA256_RE.match(x))
+
+
+def parse_steam(payload: dict) -> tuple[str | None, tuple[RemoteGame, ...]]:
+    """The Steam games a peer's index says it shares, and the kind of computer they're for."""
+    raw = payload.get("steam")
+    if not isinstance(raw, dict) or raw.get("v") != 1:
+        return None, ()
+    system, games = raw.get("os"), raw.get("games")
+    if not isinstance(system, str) or not _STEAM_OS_RE.match(system) or not isinstance(games, list):
+        return None, ()
+    found: dict[int, RemoteGame] = {}
+    for item in games[:MAX_STEAM_GAMES]:
+        if not isinstance(item, dict):
+            continue
+        appid, name, size = item.get("appid"), item.get("name"), item.get("size")
+        buildid, updated = item.get("buildid"), item.get("updated", 0)
+        if not isinstance(appid, int) or isinstance(appid, bool) or not 0 < appid < 2**32:
+            continue
+        if not isinstance(name, str) or not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            continue
+        if not isinstance(buildid, str) or not buildid.isdigit() or len(buildid) > 19:
+            continue
+        if not isinstance(updated, int) or isinstance(updated, bool):
+            updated = 0
+        shown = display_name(name).strip()[:200] or f"Steam app {appid}"
+        found.setdefault(appid, RemoteGame(appid, shown, size, buildid, updated))
+    return system, tuple(found.values())
 
 
 def parse_index(payload: object, expected_peer_id: str) -> tuple[str, tuple[RemoteFile, ...], int]:
@@ -299,6 +342,10 @@ class PeerTable:
         games = payload.get("games")
         peer.games = frozenset(g for g in games[:50] if isinstance(g, str)) if isinstance(games, list) else None
         peer.name_auto = payload.get("name_auto") is True
+        steam = parse_steam(payload)
+        if steam != (peer.steam_os, peer.steam_games):
+            self.version += 1  # ThunderCLOUD lists its games
+        peer.steam_os, peer.steam_games = steam
         if name and name != peer.name:
             peer.name = name
             self.version += 1  # ThunderCLOUD shows its files under the new name
@@ -340,6 +387,7 @@ class PeerTable:
         peer.state = IGNORED
         peer.ignore_reason = reason
         peer.files = ()
+        peer.steam_games = ()
         peer.etag = None
         peer.next_poll = time.monotonic() + IGNORED_RETRY_INTERVAL
 

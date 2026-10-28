@@ -1,4 +1,5 @@
-"""Serving files to other peers: shared files (with HTTP Range), swarm pieces, and the upload limit."""
+"""Serving files to other peers: shared files and Steam game files (with HTTP Range), swarm pieces,
+and the upload limit."""
 
 from __future__ import annotations
 
@@ -12,10 +13,12 @@ from urllib.parse import quote
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from .fsutil import long_path
 from .indexer import Indexer
 from .pathsafe import UnsafePathError, safe_join
 
 if TYPE_CHECKING:
+    from .steam import SteamLibrary
     from .transfers import DownloadManager
 
 STREAM_CHUNK = 256 * 1024
@@ -142,9 +145,27 @@ def serve_download(indexer: Indexer, file_id: str, request: Request, limiter: Up
         f.close()
         indexer.request_rescan()
         return _error(409, "changed", "The file changed since it was indexed; try again shortly.")
+    return _send_file(f, entry.size, f'"{entry.sha256}"', entry.relpath.rsplit("/", 1)[-1], request, limiter)
 
-    size = entry.size
-    etag = f'"{entry.sha256}"'
+
+def serve_game_file(steam: SteamLibrary, appid: int, relpath: str, request: Request,
+                    limiter: UploadLimiter) -> Response:
+    """A file of a shared Steam game, by its path in the game's folder."""
+    found = steam.open_file(appid, relpath)
+    if found == "changed":
+        return _error(409, "changed", "The file changed since the game's file list was made; ask for it again.")
+    if isinstance(found, str):
+        return _error(404, "not_found", "This peer does not share that game file.")
+    path, size, mtime_ns = found
+    try:
+        f = open(long_path(path), "rb")
+    except OSError:
+        return _error(404, "not_found", "This peer does not share that game file.")
+    return _send_file(f, size, f'"{size:x}-{mtime_ns:x}"', path.name, request, limiter)
+
+
+def _send_file(f: BinaryIO, size: int, etag: str, filename: str, request: Request, limiter: UploadLimiter) -> Response:
+    """Send an open file, or the part of it a Range header asks for (and close it when done)."""
     start, end, status = 0, size - 1, 200
     range_header = request.headers.get("range")
     if_range = request.headers.get("if-range")
@@ -158,7 +179,6 @@ def serve_download(indexer: Indexer, file_id: str, request: Request, limiter: Up
             start, end = parsed  # type: ignore[misc]
             status = 206
 
-    filename = entry.relpath.rsplit("/", 1)[-1]
     headers = {
         "Accept-Ranges": "bytes",
         "ETag": etag,

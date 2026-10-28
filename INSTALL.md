@@ -151,6 +151,12 @@ other by themselves.
   them, so it stays fast for everyone. A file you downloaded keeps helping others until you
   remove it from the Downloads list or stop LightningLAN. While files download, a Nyan Cat
   spins next to them; point at it and click to pause, click again to resume.
+- **Steam games**: click **Share my Steam games** in the **Your Steam games** box. Everyone sees
+  your installed games in ThunderCLOUD with a **Steam** tag, and you see theirs. Click **Get**
+  next to a game, pick the Steam library to put it in, and LightningLAN copies it from the
+  others straight into Steam's folders. When it's done, start Steam (or restart it if it's
+  open) and the game is in your library. You need to own the game on Steam to play it. Games
+  copy between Windows computers, or between Linux computers.
 - **On your phone** (Android or iPhone, nothing to install): click the phone button at the top
   right of the page, then point the phone's camera at the QR code and tap the link. The phone
   has to be on the same Wi-Fi. In the phone's browser you can download anything in

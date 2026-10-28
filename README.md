@@ -13,6 +13,9 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
 - Swarm downloads: when several people download the same file, they pass pieces to each other
   instead of all queuing at the person sharing it, so it stays fast for everyone (see
   [Swarm downloads](#swarm-downloads)).
+- Steam games: one button shares the games installed in your Steam library, and everyone else
+  gets them straight into their own Steam library, copied over the LAN instead of downloaded
+  from the internet (see [Steam games](#steam-games)).
 - Downloads stream to disk, resume after an interruption and are verified piece by piece and
   then as a whole (SHA-256) before they are saved. If a sending peer disappears, the others
   carry on.
@@ -99,6 +102,7 @@ and falls back to the browser where WebView2 is missing.
 | `--interface IP` | Advertise only on this local IPv4 address (repeatable). By default the LAN interfaces are detected automatically. |
 | `--refresh-interval SECONDS` | How often peers are polled for changes. Default `3`. |
 | `--max-upload-rate MB_PER_S` | Limit your total upload to other peers (all transfers together). Default: unlimited. |
+| `--steam-dir FOLDER` | Where Steam is installed, if LightningLAN doesn't find it by itself (see [Steam games](#steam-games)). |
 | `--no-browser` | Don't open the browser on start. |
 | `--no-tray` | No tray icon and no pop-up error messages, for servers and scripts. The tray is also skipped automatically when there is no desktop session. |
 | `-v`, `--verbose` | Log every request and debug messages. |
@@ -118,7 +122,7 @@ The config file holds the peer's unique ID, which is generated on first run. It 
 Next to it:
 
 - `hash_cache.json` remembers file hashes, so a file is only re-hashed when its size or
-  modification time changes.
+  modification time changes. `steam_hash_cache.json` does the same for shared Steam games.
 - `logs/lightninglan.log` is the log, rotated at 1 MB with 3 old copies kept. Open it from the tray
   menu (**Open Log Folder**) or from Settings.
 - `lightninglan.lock` and `instance.json` keep LightningLAN to one copy per config file. Starting it
@@ -159,11 +163,14 @@ locations too.
   its SHA-256 matches, and a corrupted transfer is discarded. If every peer with the file goes
   offline mid-transfer, the error says so, the verified pieces are kept, and **Resume**
   continues once a peer with the file is back.
+- **Your Steam games**: **Share my Steam games** shares the games installed in Steam on this
+  computer. Everyone's shared games are in ThunderCLOUD with a **Steam** tag, and **Get** puts
+  one straight into your Steam library. See [Steam games](#steam-games).
 - **Peers**: everyone online with their file counts. Peers that were found but rejected (for
   example, a different passphrase) are listed separately with the reason.
 - **Tutorial**: on the first run, a guided tour dims the page and points out the main buttons one at
-  a time (your name, peers, sharing, ThunderCLOUD, downloads, the shared folder, phones, the games
-  tab and Settings), with **Next**, **Back** and **Skip tutorial**. Two steps ask for a click on the
+  a time (your name, peers, sharing, ThunderCLOUD, downloads, the shared folder, Steam games, phones,
+  the games tab and Settings), with **Next**, **Back** and **Skip tutorial**. Two steps ask for a click on the
   real thing (the **While you wait** tab, then **Files**); nothing has to be shared or played. It
   plays by itself once (the config file says `"tutorial_due": true` until the page has shown it)
   and then only from **Settings** → **Show the tutorial**. The Android app has the same tour.
@@ -343,6 +350,47 @@ list itself, the download falls back to fetching the file whole from one sharer.
 LightningLAN 1.0 still work: they download whole files from 1.1 peers, and serve whole files to
 them.
 
+## Steam games
+
+The **Your Steam games** card (on computers; the phone page and the Android app don't have it) has
+one button, **Share my Steam games**. It shares every game installed in Steam here, in all of its
+libraries, as Steam lists them in `steamapps/libraryfolders.vdf`. The choice is remembered, and
+games installed later are shared too. A game Steam is updating, checking or still downloading is
+left out until Steam is done with it, and Steam's own tools (Proton, the Linux runtimes, the
+Steamworks redistributables) are never listed.
+
+The shared games show up in everyone's ThunderCLOUD next to the files, with a **Steam** tag.
+**Get** asks which of your Steam libraries to put the game in (the one with the most space free
+comes first). It then copies the game into `<library>/steamapps/common/<its folder>`, where Steam
+itself would install it, and writes Steam's manifest for it, `appmanifest_<appid>.acf`, last.
+Start Steam, or restart it if it was open, and the game is in your library, ready to play, with
+nothing downloaded from the internet. If the sharer's copy isn't the latest version, Steam
+downloads only the update. To play, you still need to own the game on Steam: LightningLAN copies
+the files, and Steam checks the licence as usual. A game that's already in your Steam library
+says **In your library** instead of **Get**.
+
+- The first time someone gets a game, the sharer hashes its files (SHA-256) in the background.
+  The copy starts with the first files while the rest are hashed, and the hashes are kept, so
+  the next copy of that game starts at full speed.
+- Files come from every online computer sharing the same build of the game, four at a time, and
+  each one is checked against its SHA-256 before it takes its place. If a sharer goes away, the
+  others carry on; with nobody left, the copy stops, and **Resume** continues it later.
+- Pause and Resume keep what was copied. Files already in the game's folder that match are kept
+  too, so a folder left by an earlier copy (or by Steam) isn't copied again. **Cancel** deletes
+  what the copy put there.
+- The manifest says the game is fully installed at the sharer's build, with the same depots and
+  language. It leaves out the sharer's Steam account ID, Steam's location on their computer and
+  when they last played; Steam fills those in.
+
+Games are copied between computers of the same kind only, Windows to Windows and Linux to Linux,
+because Steam on Linux keeps Windows games played through Proton differently. A game shared only
+from the other kind says **For Windows** (or **For Linux**). Workshop items, saved games and mods
+kept outside the game's folder aren't copied; Steam downloads Workshop items by itself.
+
+LightningLAN finds Steam by itself: on Windows from the registry (or `Program Files (x86)\Steam`),
+on Linux in `~/.local/share/Steam`, `~/.steam/steam`, or the Flatpak and Snap folders. Elsewhere,
+give its folder with `--steam-dir`.
+
 ## Firewall notes
 
 LightningLAN needs two kinds of traffic between the computers:
@@ -405,8 +453,15 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
   endpoints: a shared file's piece hashes (`/api/pieces/<sha256>`), which pieces you hold of a
   file you are downloading (`/api/swarm/<sha256>`), and those pieces themselves
   (`/api/piece/<sha256>/<n>`). Files are always looked up by hash in your own index or download
-  list, never by a path from the network. While LightningLAN is stopped (or its page is
+  list, never by a path from the network. With **Share my Steam games** on, also the shared
+  games' file lists (`GET /api/steam/<appid>`) and the files inside those games' folders
+  (`GET /api/steam/<appid>/<path>`): the path is checked to stay inside the game's folder, so
+  nothing else in Steam's folders can be reached. While LightningLAN is stopped (or its page is
   closed), all of these answer "503 offline", and transfers in progress are cut off.
+- **Steam games are checked against the sharer, not Steam.** A copied game matches the sharer's
+  file list exactly, but like any file from a peer, it's only as trustworthy as the computer it
+  came from. In Steam, the game's **Properties** → **Installed Files** → **Verify integrity of
+  game files** checks it against Steam's servers.
 - **What swarming reveals.** Your file list includes the hashes of files you are downloading or
   have downloaded (while they are in the Downloads list), so other peers can tell which shared
   files you fetched. Pieces of those files are served only to peers asking for them by hash,
@@ -553,6 +608,8 @@ lightninglan/
   play.py        While you wait: the head-to-head games, records, and syncing with opponents
   games.py       the rules of every head-to-head game (the same as the Android app's Games.kt)
   serving.py     streaming files and pieces to peers, Range requests, the upload limit
+  steam.py       Steam games: finding the libraries, reading manifests, hashing shared games
+  steamget.py    getting a Steam game from other peers into a Steam library here
   transfers.py   download manager: queue, resume, verification, fall-back to whole files
   swarm.py       swarm downloads: choosing pieces and peers, passing pieces on
   pieces.py      piece sizes, piece hashes, have-maps
@@ -587,6 +644,9 @@ android/         the Android app (Kotlin): see android/README.md
 - Downloaded files keep their name but not their folder: everything lands directly in the
   downloads folder.
 - Files with the same name but different content show up as separate rows.
+- A Steam game copied from another computer appears in Steam only after Steam starts again.
+  Games copy only between computers of the same kind (Windows or Linux), and a game you already
+  have isn't updated from the LAN: Steam updates it from the internet as usual.
 - The packaged apps are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn on
   first launch (see [INSTALL.md](INSTALL.md)). Antivirus programs sometimes flag one-file
   PyInstaller executables by mistake.

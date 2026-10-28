@@ -13,10 +13,13 @@
   var TEMP_SUFFIXES = ['.part', '.partial', '.crdownload', '.tmp'];
   var THEMES = ['synthwave', 'bliss', 'deepsea', 'light', 'dark'];  // the first one is the default
   var THEME_NAMES = { synthwave: 'Synthwave', bliss: 'Bliss', deepsea: 'Deep Sea', light: 'Light', dark: 'Dark' };
+  var SYSTEM_NAMES = { windows: 'Windows', linux: 'Linux', mac: 'Mac' };
 
   var state = {
     status: null,
     files: [],
+    games: [],  // Steam games shared on the network (steam.py), listed in ThunderCLOUD with the files
+    steamFound: false,  // Steam is installed on this computer
     filesEtag: null,
     peers: [],
     ignored: [],
@@ -153,6 +156,7 @@
     $('share-summary').textContent = summary;
     renderSharing();
     renderPhones();
+    renderSteam();
     if (s.tutorial_due && !tutorialStarted) {  // the first run: once, then only from Settings
       tutorialStarted = true;
       api('POST', '/api/tutorial/seen').catch(function () {});
@@ -342,6 +346,153 @@
     phonesSeen = n;
   }
 
+  // ----- Steam games ------------------------------------------------------------------------
+  // The button shares the games installed in Steam here; every computer's shared games are listed in
+  // ThunderCLOUD, and Get copies one straight into a Steam library on this computer (steamget.py).
+
+  var steamGame = null;  // the game the get dialog is for
+
+  function renderSteam() {
+    var s = state.status && state.status.steam;
+    if (!s) return;
+    $('steam-share').hidden = !s.found || s.sharing;
+    $('steam-unshare').hidden = !s.found || !s.sharing;
+    $('steam-summary').textContent = !s.found ? 'Steam isn’t installed on this computer.' :
+      s.sharing ? 'Sharing ' + plural(s.shared, 'game') + ' from your Steam library with everyone here.' :
+      plural(s.installed, 'game') + ' in your Steam library, not shared.';
+  }
+
+  async function setSteamSharing(on) {
+    var button = $(on ? 'steam-share' : 'steam-unshare');
+    button.disabled = true;
+    try {
+      var r = await api('POST', '/api/my-steam/share', { on: on });
+      if (state.status) {
+        state.status.steam = { found: r.found, sharing: r.sharing, shared: r.shared, installed: r.installed };
+      }
+      renderSteam();
+      toast(on ? 'Sharing ' + plural(r.shared, 'Steam game') + '.' : 'Your Steam games aren’t shared any more.',
+        on ? 'ok' : undefined);
+      state.filesEtag = null;
+      refreshFiles().catch(function () {});
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function showSteamError(message) {
+    $('steam-error').textContent = message || '';
+    $('steam-error').hidden = !message;
+  }
+
+  async function openSteamGet(g) {
+    var info;
+    try {
+      info = await api('GET', '/api/my-steam');
+    } catch (e) {
+      toast('Could not read your Steam libraries: ' + e.message, 'error');
+      return;
+    }
+    if (!info.libraries.length) {
+      toast('No Steam library found on this computer.', 'error');
+      return;
+    }
+    steamGame = g;
+    $('steam-game-name').textContent = g.name;
+    var sharers = g.sources.filter(function (s) { return !s.self; }).map(function (s) { return s.name; });
+    $('steam-game-info').textContent = formatSize(g.size) + ' · shared by ' + sharers.join(', ');
+    var select = $('steam-library');
+    var best = null;
+    select.textContent = '';
+    info.libraries.forEach(function (lib) {
+      var room = lib.free === null || lib.free >= g.size;
+      var option = el('option', null, lib.path + (lib.free === null ? '' : ' (' + formatSize(lib.free) + ' free)') +
+        (room ? '' : ': not enough space'));
+      option.value = lib.path;
+      option.disabled = !room;
+      select.appendChild(option);
+      if (room && (!best || (lib.free || 0) > (best.free || 0))) best = lib;
+    });
+    if (best) select.value = best.path;
+    $('steam-get').disabled = !best;
+    showSteamError(best ? '' : 'None of your Steam libraries has ' + formatSize(g.size) + ' free.');
+    var dialog = $('steam-dialog');
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+
+  function closeSteamGet() {
+    var dialog = $('steam-dialog');
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+    steamGame = null;
+  }
+
+  async function confirmSteamGet() {
+    var g = steamGame;
+    if (!g) return;
+    var button = $('steam-get');
+    button.disabled = true;
+    showSteamError('');
+    try {
+      var d = await api('POST', '/api/my-steam/get', { appid: g.appid, library: $('steam-library').value });
+      closeSteamGet();
+      state.downloadStatus[d.id] = d.status;
+      state.downloads = [d].concat(state.downloads.filter(function (x) { return x.id !== d.id; }));
+      renderDownloads();
+      refreshActionCells();
+      scheduleDownloads(300);
+    } catch (e) {
+      showSteamError(e.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function activeGameDownload(appid) {
+    for (var i = 0; i < state.downloads.length; i++) {
+      var d = state.downloads[i];
+      if (d.kind === 'steam' && d.appid === appid && d.status !== 'canceled') return d;
+    }
+    return null;
+  }
+
+  function fillGameCell(cell, g) {
+    var d = g.installed ? null : activeGameDownload(g.appid);
+    var sig = g.installed ? 'installed' : d && d.status === 'completed' ? 'done' : !state.steamFound ? 'no-steam' :
+      d && (d.status === 'paused' || d.status === 'failed') ? 'resume' : d ? 'pct' + percent(d) :
+      !g.installable ? 'other' : 'button';
+    if (cell.dataset.sig === sig) return;  // unchanged: keep the element (and its focus)
+    cell.dataset.sig = sig;
+    cell.textContent = '';
+    var label;
+    if (sig === 'installed' || sig === 'done') {
+      label = el('span', 'state-label' + (sig === 'done' ? ' ok' : ''), sig === 'done' ? 'Copied ✓' : 'In your library');
+      label.title = 'It’s in your Steam library' + (sig === 'done' ? ' the next time Steam starts.' : '.');
+    } else if (sig === 'no-steam') {
+      label = el('span', 'state-label', 'Needs Steam');
+      label.title = 'Install Steam on this computer to get Steam games.';
+    } else if (sig === 'other') {
+      var systems = g.systems.map(function (s) { return SYSTEM_NAMES[s] || s; }).join(' or ');
+      label = el('span', 'state-label', 'For ' + systems);
+      label.title = 'Shared from ' + systems + ' computers only: Steam on this one installs it differently.';
+    } else if (sig === 'resume') {
+      label = el('button', 'btn secondary', 'Resume');
+      label.type = 'button';
+      label.addEventListener('click', function () { downloadAction(d, 'resume'); });
+    } else if (d) {
+      label = el('span', 'state-label', percent(d) + '%');
+    } else {
+      label = el('button', 'btn', 'Get');
+      label.type = 'button';
+      label.title = 'Copy it into your Steam library';
+      label.addEventListener('click', function () { openSteamGet(g); });
+    }
+    cell.appendChild(label);
+  }
+
   // ----- the web UI session ---------------------------------------------------------------
   // While the page is open, one tab keeps /api/ui-session open (a Web Lock picks which, so any
   // number of tabs share one connection). When the last tab closes, LightningLAN stops sharing;
@@ -414,6 +565,11 @@
       target: function () { return $('share-dir').closest('.card'); }, title: 'Your shared folder', before: filesTab,
       text: 'Everyone running LightningLAN here can see what’s in this folder. Stop LightningLAN takes you off the ' +
         'network until you start it again.'
+    },
+    {
+      target: '#steam-card', title: 'Steam games', before: filesTab,
+      text: 'One click shares the games in your Steam library. Everyone’s shared games show up in ThunderCLOUD ' +
+        'with a Steam tag, and Get copies one straight into your own Steam library, from them instead of the internet.'
     },
     {
       target: '#phone-open', title: 'Phones', before: filesTab,
@@ -590,6 +746,7 @@
       name.title = p.name;
       body.appendChild(name);
       var meta = plural(p.files, 'file') + ' · ' + formatSize(p.total_size);
+      if (p.steam_games) meta += ' · ' + plural(p.steam_games, 'Steam game');
       if (p.indexing) meta += ' · indexing…';
       meta += ' · ' + p.address;
       body.appendChild(el('div', 'peer-meta', meta));
@@ -626,6 +783,8 @@
     var data = await r.json();
     state.filesEtag = r.headers.get('ETag');
     state.files = data.files;
+    state.games = (data.games || []).map(function (g) { return Object.assign(g, { kind: 'game', aliases: [] }); });
+    state.steamFound = !!data.steam_found;
     state.indexingPending = data.indexing_pending;
     renderFiles();
   }
@@ -641,7 +800,7 @@
     var key = state.sort.key;
     var dir = state.sort.dir;
     var filter = state.filter.trim().toLowerCase();
-    var items = state.files.filter(function (f) {
+    var items = state.files.concat(state.games).filter(function (f) {
       if (state.sharer && !f.sources.some(function (s) { return s.peer_id === state.sharer; })) return false;
       return !filter || f.name.toLowerCase().indexOf(filter) !== -1 ||
         f.aliases.some(function (a) { return a.toLowerCase().indexOf(filter) !== -1; });
@@ -666,6 +825,10 @@
   }
 
   function fillActionCell(cell, f) {
+    if (f.kind === 'game') {
+      fillGameCell(cell, f);
+      return;
+    }
     var d = f.local ? null : activeDownloadFor(f.id);
     var sig = f.local ? 'local' : !d ? 'button' : d.status === 'completed' ? 'done' :
       d.status === 'verifying' ? 'verifying' : 'pct' + percent(d);
@@ -694,7 +857,7 @@
   function fillSharers() {
     var select = $('sharer');
     var sharers = {};
-    state.files.forEach(function (f) {
+    state.files.concat(state.games).forEach(function (f) {
       f.sources.forEach(function (s) { sharers[s.peer_id] = { name: s.self ? 'You' : s.name, self: s.self }; });
     });
     if (state.sharer && !sharers[state.sharer]) state.sharer = '';  // went offline, or shares nothing now
@@ -728,9 +891,16 @@
       tr.dataset.id = f.id;
 
       var nameCell = el('td', 'name');
-      var slash = f.name.lastIndexOf('/');
-      if (slash !== -1) nameCell.appendChild(el('span', 'folder', f.name.slice(0, slash + 1)));
-      nameCell.appendChild(document.createTextNode(f.name.slice(slash + 1)));
+      if (f.kind === 'game') {
+        var tag = el('span', 'steam-tag', 'Steam');
+        tag.title = 'A Steam game: Get puts it in your Steam library';
+        nameCell.appendChild(tag);
+        nameCell.appendChild(document.createTextNode(f.name));
+      } else {
+        var slash = f.name.lastIndexOf('/');
+        if (slash !== -1) nameCell.appendChild(el('span', 'folder', f.name.slice(0, slash + 1)));
+        nameCell.appendChild(document.createTextNode(f.name.slice(slash + 1)));
+      }
       if (f.aliases.length) nameCell.appendChild(el('span', 'alias', 'also named: ' + f.aliases.join(', ')));
       tr.appendChild(nameCell);
 
@@ -742,7 +912,8 @@
       var owners = el('div', 'owners');
       f.sources.forEach(function (s) {
         var chip = el('span', 'owner' + (s.self ? ' you' : ''), s.self ? 'You' : s.name);
-        chip.title = s.self ? 'In your shared folder as ' + s.file_name : s.name + ': ' + s.file_name;
+        if (f.kind === 'game') chip.title = (s.self ? 'You share it' : s.name) + ' (build ' + s.buildid + ')';
+        else chip.title = s.self ? 'In your shared folder as ' + s.file_name : s.name + ': ' + s.file_name;
         owners.appendChild(chip);
       });
       ownersCell.appendChild(owners);
@@ -759,7 +930,8 @@
     tbody.appendChild(rows);
 
     var empty = $('files-empty');
-    if (!state.files.length) {
+    var everything = state.files.length + state.games.length;
+    if (!everything) {
       empty.textContent = 'Nothing shared yet. Drop files above to share them, or wait for other computers ' +
         'running LightningLAN to appear.';
     } else if (!items.length) {
@@ -767,10 +939,11 @@
     }
     empty.hidden = items.length > 0;
 
-    var total = state.files.reduce(function (sum, f) { return sum + f.size; }, 0);
-    var summary = plural(state.files.length, 'file') + ' · ' + formatSize(total);
-    if (items.length !== state.files.length) summary = items.length + ' of ' + summary;
-    $('file-summary').textContent = state.files.length ? summary : '';
+    var total = state.files.concat(state.games).reduce(function (sum, f) { return sum + f.size; }, 0);
+    var summary = plural(state.files.length, 'file') +
+      (state.games.length ? ' · ' + plural(state.games.length, 'Steam game') : '') + ' · ' + formatSize(total);
+    if (items.length !== everything) summary = items.length + ' of ' + summary;
+    $('file-summary').textContent = everything ? summary : '';
 
     document.querySelectorAll('#files th[data-sort]').forEach(function (th) {
       var active = th.dataset.sort === state.sort.key;
@@ -781,7 +954,7 @@
 
   function refreshActionCells() {
     var byId = {};
-    state.files.forEach(function (f) { byId[f.id] = f; });
+    state.files.concat(state.games).forEach(function (f) { byId[f.id] = f; });
     document.querySelectorAll('#file-rows tr').forEach(function (tr) {
       var f = byId[tr.dataset.id];
       if (f) fillActionCell(tr.lastChild, f);
@@ -827,7 +1000,9 @@
     data.downloads.forEach(function (d) {
       var before = state.downloadStatus[d.id];
       if (before && before !== d.status) {
-        if (d.status === 'completed') toast('Downloaded ' + d.name, 'ok');
+        if (d.status === 'completed' && d.kind === 'steam') {
+          toast(d.name + ' is in your Steam library. Start or restart Steam to play it.', 'ok');
+        } else if (d.status === 'completed') toast('Downloaded ' + d.name, 'ok');
         else if (d.status === 'failed') toast(d.name + ': ' + (d.error || 'download failed'), 'error');
       }
       state.downloadStatus[d.id] = d.status;
@@ -849,8 +1024,23 @@
     return specs;
   }
 
+  function gameMeta(d) {
+    if (d.status === 'completed') return 'In your Steam library: ' + d.path;
+    if (d.status === 'canceled') return 'Canceled';
+    var parts = [formatSize(d.received) + ' of ' + formatSize(d.size)];
+    if (d.files && d.files.total) parts.push(d.files.done + ' of ' + plural(d.files.total, 'file'));
+    if (d.status === 'downloading' && d.speed) parts.push(formatSize(d.speed) + '/s');
+    var senders = (d.peers || []).filter(function (x) { return x.bytes > 0; });
+    if (senders.length > 1) parts.push('from ' + senders[0].name + ' and ' + plural(senders.length - 1, 'other peer'));
+    else if (d.source) parts.push('from ' + d.source.name);
+    if (d.status === 'paused') parts.push('paused');
+    if (d.status === 'queued') parts.push(d.note ? 'queued' : 'starting…');
+    return parts.join(' · ');
+  }
+
   function downloadMeta(d) {
     var parts = [];
+    if (d.kind === 'steam') return gameMeta(d);
     if (d.status === 'completed') return 'Saved as ' + d.path;
     if (d.status === 'verifying') return 'Checking SHA-256…';
     parts.push(formatSize(d.received) + ' of ' + formatSize(d.size));
@@ -1308,6 +1498,15 @@
     $('phone-close').addEventListener('click', closePhone);
     $('phone-new-key').addEventListener('click', newPhoneKey);
     $('phone-address').addEventListener('change', showPhoneLink);
+    $('steam-share').addEventListener('click', function () { setSteamSharing(true); });
+    $('steam-unshare').addEventListener('click', function () {
+      if (window.confirm('Stop sharing your Steam games? Copies others have already started stop too.')) {
+        setSteamSharing(false);
+      }
+    });
+    $('steam-cancel').addEventListener('click', closeSteamGet);
+    $('steam-get').addEventListener('click', confirmSteamGet);
+    $('steam-dialog').addEventListener('close', function () { steamGame = null; });
     $('settings-open').addEventListener('click', openSettings);
     $('settings-cancel').addEventListener('click', closeSettings);
     $('settings-form').addEventListener('submit', saveSettings);
