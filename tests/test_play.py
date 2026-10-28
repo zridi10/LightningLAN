@@ -460,11 +460,13 @@ def test_memory_match_both_see_the_same_cards(pair):
     a.move(gid, first_pair[1])
     sync(a, b)
     assert only_game(a)["score"] == [1, 0] and only_game(a)["your_turn"]
-    miss = next(i for i in range(16) if layout[i] != layout[1] and i not in first_pair and i != 1)
-    a.move(gid, 1)
+    face_down = [i for i in range(16) if i not in first_pair]  # the layout is random: card 1 may be matched
+    turned = face_down[0]
+    miss = next(i for i in face_down if layout[i] != layout[turned])
+    a.move(gid, turned)
     a.move(gid, miss)
     sync(a, b)
-    assert only_game(b)["your_turn"] and only_game(b)["shown"] == [1, miss]
+    assert only_game(b)["your_turn"] and only_game(b)["shown"] == [turned, miss]
 
 
 def game(arcade, gid):
