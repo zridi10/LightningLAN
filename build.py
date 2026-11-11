@@ -30,7 +30,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build"
 DIST = ROOT / "dist"
-REQUIRED_MODULES = ("fastapi", "uvicorn", "zeroconf", "httpx", "pystray", "PIL", "segno", "PyInstaller") + (
+REQUIRED_MODULES = (
+    "fastapi", "uvicorn", "zeroconf", "httpx", "pystray", "PIL", "segno", "zstandard", "PyInstaller",
+) + (
     ("webview",) if sys.platform == "win32" else ()
 )
 

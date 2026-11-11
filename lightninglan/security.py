@@ -1,8 +1,9 @@
 """Access control for the HTTP server, as plain ASGI middleware (it must not buffer streams).
 
 * Only GET/HEAD /api/files, /api/games, /api/download/{id}, the swarm routes (/api/pieces/{id},
-  /api/swarm/{id}, /api/piece/{id}/{n}) and the shared Steam games (/api/steam/{appid} and
-  /api/steam/{appid}/{path}) are reachable from the LAN. When a
+  /api/swarm/{id}, /api/piece/{id}/{n}), the shared Steam games (/api/steam/{appid} and
+  /api/steam/{appid}/{path}) and what has been copied of a game being got (/api/steam-copy/{appid})
+  are reachable from the LAN. When a
   passphrase is set they require a valid peer token, and responses carry a proof header.
   While this peer is stopped (offline) they answer 503, and transfers in progress are cut off.
 * The phone page (/phone) and the page's own files (/static/) are open to the LAN; opening this
@@ -34,7 +35,7 @@ _LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
-_LAN_PREFIXES = ("/api/download/", "/api/pieces/", "/api/swarm/", "/api/piece/", "/api/steam/")
+_LAN_PREFIXES = ("/api/download/", "/api/pieces/", "/api/swarm/", "/api/piece/", "/api/steam/", "/api/steam-copy/")
 
 
 def is_lan_route(path: str) -> bool:

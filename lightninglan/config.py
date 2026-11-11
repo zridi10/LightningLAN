@@ -70,6 +70,7 @@ class Settings:
     interfaces: list[str] | None = None
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
     max_upload_rate: float | None = None  # bytes per second, all uploads together
+    max_download_rate: float | None = None  # and all downloads together
     discovery: bool = True
     open_browser: bool = True
     steam_dir: Path | None = None  # where Steam is, when it isn't found by itself

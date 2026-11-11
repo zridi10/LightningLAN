@@ -70,8 +70,9 @@ def test_peer_killed_mid_transfer_shows_error_and_resumes_after_restart(spawn):
     wait_until_listed(b, file_id, a)
 
     download_id = b.post("/api/downloads", json={"file_id": file_id}).json()["id"]
-    wait_for(lambda: get_download(b, download_id)["received"] >= 5 * MB, timeout=30, interval=0.05,
-             message="5 MB to arrive")
+    # 9 MB, counting pieces still arriving: up to 4 of 1 MiB come at once (swarm.PER_SOURCE).
+    wait_for(lambda: get_download(b, download_id)["received"] >= 9 * MB, timeout=30, interval=0.05,
+             message="9 MB to arrive")
     a.kill()
 
     d = wait_download(b, download_id, timeout=30)

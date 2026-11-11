@@ -9,9 +9,11 @@ on all of them.
 from __future__ import annotations
 
 import itertools
+import os
 import re
+import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Iterator
+from typing import BinaryIO, Iterator
 
 
 class UnsafePathError(ValueError):
@@ -88,6 +90,20 @@ def validate_component(part: str) -> None:
         raise UnsafePathError("file name is too long")
 
 
+def plain(path: str) -> str:
+    r"""`path` without Windows' extended-length prefix (\\?\ or \\?\UNC\)."""
+    if path.startswith("\\\\?\\"):
+        return "\\\\" + path[8:] if path[4:8].upper() == "UNC\\" else path[4:]
+    return path
+
+
+def resolve(path: Path) -> Path:
+    r"""path.resolve(), always in the same form. On Windows, realpath keeps the \\?\ prefix it works
+    with if the file is locked (a virus scanner reading it, say) at the wrong moment, and the same
+    folder then looks like another one to is_within."""
+    return Path(plain(str(path.resolve())))
+
+
 def is_within(path: Path, root: Path) -> bool:
     """True if `path` is `root` or inside it. Both paths must already be resolved."""
     try:
@@ -104,11 +120,51 @@ def safe_join(root: Path, relpath: str) -> Path:
     elsewhere is caught here too.
     """
     parts = split_relative(relpath)
-    root_resolved = root.resolve()
-    target = root_resolved.joinpath(*parts).resolve()
+    root_resolved = resolve(root)
+    target = resolve(root_resolved.joinpath(*parts))
     if target == root_resolved or not is_within(target, root_resolved):
         raise UnsafePathError("path escapes the shared folder")
     return target
+
+
+def open_within(root: Path, relpath: str) -> BinaryIO:
+    """Open an untrusted relative path under `root` (resolved, as resolve() gives it) for reading,
+    refusing anything that lands outside it. The check is made on the file that was opened, so a
+    folder swapped for a link at the same moment is caught too, and it costs a tenth of safe_join's
+    (which on Windows opens every part of the path to resolve it). Raises UnsafePathError or OSError."""
+    f = open(root.joinpath(*split_relative(relpath)), "rb")
+    try:
+        opened = _opened_path(f)
+        real = Path(plain(opened)) if opened is not None else resolve(Path(f.name))
+        if real == root or not is_within(real, root):
+            raise UnsafePathError("path escapes the shared folder")
+    except BaseException:
+        f.close()
+        raise
+    return f
+
+
+def _opened_path(f: BinaryIO) -> str | None:
+    """Where the open file really is, links followed; None if this system can't say."""
+    if sys.platform == "win32":
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        get = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+        get.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+        get.restype = wintypes.DWORD
+        buf = ctypes.create_unicode_buffer(1024)
+        n = get(msvcrt.get_osfhandle(f.fileno()), buf, len(buf), 0)
+        if not n or n >= len(buf):
+            return None
+        return buf.value
+    if sys.platform.startswith("linux"):
+        try:
+            return os.readlink(f"/proc/self/fd/{f.fileno()}")
+        except OSError:
+            return None
+    return None
 
 
 def display_name(name: str) -> str:

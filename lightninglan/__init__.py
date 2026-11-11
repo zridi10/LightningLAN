@@ -1,5 +1,5 @@
 """LightningLAN: zero-configuration peer-to-peer file sharing on a local network."""
 
-__version__ = "1.6.1"
+__version__ = "1.7.0"
 
 SERVICE_TYPE = "_lightninglan._tcp.local."

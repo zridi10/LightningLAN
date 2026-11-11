@@ -1,15 +1,31 @@
-"""Network interface selection for mDNS advertising."""
+"""Network interface selection for mDNS advertising, and what every HTTP client here shares."""
 
 from __future__ import annotations
 
 import ipaddress
 import logging
 import socket
+import ssl
+import threading
 from dataclasses import dataclass
 
 import ifaddr
 
 log = logging.getLogger(__name__)
+
+_tls: ssl.SSLContext | None = None
+_tls_lock = threading.Lock()
+
+
+def tls_context() -> ssl.SSLContext:
+    """One TLS context for every httpx client (pass it as verify=). Peers talk plain HTTP, but httpx
+    builds a context per client anyway, loading the system's certificates: ~0.3 s each time on
+    Windows, which every download paid before its first request."""
+    global _tls
+    with _tls_lock:
+        if _tls is None:
+            _tls = ssl.create_default_context()
+        return _tls
 
 # Adapter-name fragments of virtual networks that never reach other machines on the LAN:
 # container bridges, VM host-only networks, WSL/Hyper-V internal switches, overlay VPNs.

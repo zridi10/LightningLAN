@@ -72,6 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MB_PER_S",
         help="limit your total upload to other peers, in megabytes per second",
     )
+    p.add_argument(
+        "--max-download-rate",
+        type=float,
+        metavar="MB_PER_S",
+        help="limit your total download from other peers, in megabytes per second",
+    )
     p.add_argument("--steam-dir", metavar="FOLDER", help="the Steam folder, if it isn't found by itself")
     p.add_argument("--no-browser", action="store_true", help="don't open the web UI on start")
     p.add_argument("--no-tray", action="store_true", help="no tray icon and no pop-up messages (servers, scripts)")
@@ -134,6 +140,10 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         if args.max_upload_rate <= 0:
             raise ConfigError("--max-upload-rate must be positive")
         settings.max_upload_rate = args.max_upload_rate * 1024 * 1024
+    if args.max_download_rate is not None:
+        if args.max_download_rate <= 0:
+            raise ConfigError("--max-download-rate must be positive")
+        settings.max_download_rate = args.max_download_rate * 1024 * 1024
     return settings
 
 

@@ -26,12 +26,16 @@ from pathlib import Path
 import httpx
 
 from .auth import Authenticator
+from .compress import COMPRESS_HEADER, ZSTD, Body
+from .netutil import tls_context
 from .fsutil import format_size, free_space, move_without_overwrite
 from .pathsafe import display_name, safe_local_filename
 from .peers import Peer, PeerTable, RemoteFile, describe_http_error
 from .pieces import PieceInfo, swarmable
+from .serving import RateLimiter
 from .swarm import (
     Contributor,
+    InOrderHasher,
     SwarmFailed,
     SwarmSession,
     SwarmState,
@@ -142,10 +146,12 @@ class Download:
 
 
 class DownloadManager:
-    def __init__(self, downloads_dir: Path, auth: Authenticator, peers: PeerTable):
+    def __init__(self, downloads_dir: Path, auth: Authenticator, peers: PeerTable,
+                 limiter: RateLimiter | None = None):
         self.downloads_dir = downloads_dir  # where new downloads go
         self.auth = auth
         self.peers = peers
+        self.limiter = limiter or RateLimiter()  # all downloads together (--max-download-rate)
         self.swarm_version = 0  # bumps when the set of files we can pass pieces of changes
         self._downloads: dict[str, Download] = {}
         self._stops: dict[str, threading.Event] = {}
@@ -291,7 +297,8 @@ class DownloadManager:
         state = self._swarm.get(file_id)
         return state.info if state is not None and state.complete else None
 
-    def _register(self, state: SwarmState) -> None:
+    def register_swarm(self, state: SwarmState) -> None:
+        """Pass on the pieces of a file we hold: a download, or a big file of a Steam game being copied."""
         with self._lock:
             current = self._swarm.get(state.info.file_id)
             if current is not None and current is not state and current.complete and not state.complete:
@@ -299,7 +306,7 @@ class DownloadManager:
             self._swarm[state.info.file_id] = state
             self.swarm_version += 1
 
-    def _unregister(self, state: SwarmState) -> None:
+    def unregister_swarm(self, state: SwarmState) -> None:
         with self._lock:
             if self._swarm.get(state.info.file_id) is state:
                 del self._swarm[state.info.file_id]
@@ -307,7 +314,7 @@ class DownloadManager:
 
     def _stop_passing_on(self, d: Download) -> None:
         if d.swarm_state is not None:
-            self._unregister(d.swarm_state)
+            self.unregister_swarm(d.swarm_state)
 
     def shutdown(self) -> None:
         for stop in list(self._stops.values()):
@@ -356,7 +363,7 @@ class DownloadManager:
             return
         state, d.swarm_state = d.swarm_state, None
         if state is not None:
-            self._unregister(state)
+            self.unregister_swarm(state)
         try:
             if state is not None:
                 with state.exclusive():
@@ -425,7 +432,7 @@ class DownloadManager:
             headers = self.auth.sign_request("GET", path)
             try:
                 with httpx.stream("GET", f"{peer.base_url()}{path}", headers=headers, timeout=10.0,
-                                  trust_env=False) as resp:
+                                  trust_env=False, verify=tls_context()) as resp:
                     if resp.status_code != 200 or not self.auth.verify_response(headers, resp.headers):
                         continue
                     body = b""
@@ -451,7 +458,7 @@ class DownloadManager:
             else:
                 have = bytearray(info.count)
             state = d.swarm_state = SwarmState(info, part, have)
-        self._register(state)
+        self.register_swarm(state)
         needed = d.size - state.have_bytes
         free = free_space(d.directory)
         if free is not None and free < needed:
@@ -463,29 +470,39 @@ class DownloadManager:
         d.speed = 0
         session = SwarmSession(
             state, part, self.peers.own_peer_id, self.peers, self.auth,
-            lambda: [p for p, _ in self.sources(d.file_id)], d, stop,
+            lambda: [p for p, _ in self.sources(d.file_id)], d, stop, limiter=self.limiter,
         )
+        hasher = InOrderHasher(state, part)  # the whole file's SHA-256 as it comes, not after
+        hasher.start()
         try:
-            session.run()
-        except SwarmStopped:
-            d.received = state.have_bytes
-            raise _Stop() from None
-        except SwarmFailed as exc:
-            d.received = state.have_bytes
-            raise _SourceFailed(str(exc)) from None
-        except SwarmUnusable as exc:
-            log.warning("swarm download of %s: %s; downloading the whole file instead", d.name, exc)
-            self._unregister(state)
-            with state.exclusive():
-                with open(part, "r+b") as f:
-                    f.truncate(state.prefix_bytes())  # keep the verified start for a Range resume
-            d.swarm_state, d.piece_info = None, None
-            d.note = "Some pieces failed their checks; downloading the file in one piece instead…"
-            return False
-        d.received = d.size
-        d.speed = 0
-        if not self._verify(d, part):
-            self._unregister(state)
+            try:
+                session.run()
+            except SwarmStopped:
+                d.received = state.have_bytes
+                raise _Stop() from None
+            except SwarmFailed as exc:
+                d.received = state.have_bytes
+                raise _SourceFailed(str(exc)) from None
+            except SwarmUnusable as exc:
+                log.warning("swarm download of %s: %s; downloading the whole file instead", d.name, exc)
+                hasher.close()
+                self.unregister_swarm(state)
+                with state.exclusive():
+                    with open(part, "r+b") as f:
+                        f.truncate(state.prefix_bytes())  # keep the verified start for a Range resume
+                d.swarm_state, d.piece_info = None, None
+                d.note = "Some pieces failed their checks; downloading the file in one piece instead…"
+                return False
+            d.received = d.size
+            d.status, d.speed = VERIFYING, 0
+            try:
+                whole = hasher.finish(stop)
+            except SwarmStopped:
+                raise _Stop() from None
+        finally:
+            hasher.close()  # before the file is moved, or deleted
+        if whole != d.file_id:
+            self.unregister_swarm(state)
             d.swarm_state = None
             with state.exclusive():
                 part.unlink(missing_ok=True)
@@ -561,13 +578,14 @@ class DownloadManager:
         path = f"/api/download/{d.file_id}"
         url = f"{peer.base_url()}{path}"
         headers = self.auth.sign_request("GET", path)
+        headers[COMPRESS_HEADER] = ZSTD  # the peer may compress it on the way (compress.py)
         if offset:
             headers["Range"] = f"bytes={offset}-"
             headers["If-Range"] = f'"{d.file_id}"'
         timeout = httpx.Timeout(READ_TIMEOUT, connect=5.0)
         start_offset = offset
         try:
-            with httpx.Client(timeout=timeout, trust_env=False) as client:
+            with httpx.Client(timeout=timeout, trust_env=False, verify=tls_context()) as client:
                 with client.stream("GET", url, headers=headers) as resp:
                     if not self.auth.verify_response(headers, resp.headers):
                         raise _SourceFailed(f"{peer.name} failed the passphrase check.")
@@ -588,6 +606,8 @@ class DownloadManager:
                     else:
                         raise _SourceFailed(f"{peer.name} answered HTTP {resp.status_code}.")
                     self._receive(d, resp, part, offset, stop)
+        except ValueError as exc:  # compressed data that doesn't decompress
+            raise _SourceFailed(f"{peer.name} sent data that can't be read: {exc}.") from exc
         except httpx.HTTPError as exc:
             done = f"{d.received / d.size:.0%}" if d.size else "0%"
             if d.received > start_offset:
@@ -609,7 +629,8 @@ class DownloadManager:
             if offset:
                 f.seek(offset)
                 f.truncate()
-            for chunk in resp.iter_raw():  # as it arrives: nothing is lost if the link drops
+            body, counted = Body.of(resp), 0
+            for chunk in body:  # as it arrives: nothing is lost if the link drops
                 if stop.is_set():
                     raise _Stop()
                 if d.received + len(chunk) > d.size:
@@ -617,6 +638,8 @@ class DownloadManager:
                 f.write(chunk)
                 d.received += len(chunk)
                 window_bytes += len(chunk)
+                self.limiter.consume(body.raw - counted)  # what came over the network
+                counted = body.raw
                 elapsed = time.monotonic() - window_start
                 if elapsed >= 0.5:
                     rate = window_bytes / elapsed
@@ -638,7 +661,7 @@ class DownloadManager:
             with state.exclusive():  # nobody may be reading a piece from the .part while it moves
                 final = self._move_into_place(d, part)
             state.set_complete(final)  # and from now on, pieces are read from the saved file
-            self._register(state)
+            self.register_swarm(state)
         else:
             final = self._move_into_place(d, part)
         d.path = str(final)

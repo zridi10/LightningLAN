@@ -32,7 +32,8 @@ def test_port_in_use_is_a_friendly_error(tmp_path):
     assert "Traceback" not in r.stderr
 
 
-@pytest.mark.parametrize("args", [["--refresh-interval", "0"], ["--max-upload-rate", "-1"], ["--port", "70000"]])
+@pytest.mark.parametrize("args", [["--refresh-interval", "0"], ["--max-upload-rate", "-1"], ["--max-download-rate", "0"],
+                                  ["--port", "70000"]])
 def test_invalid_options_are_rejected(tmp_path, args):
     r = run_cli("--share", str(tmp_path / "s"), "--downloads", str(tmp_path / "d"), "--config",
                 str(tmp_path / "c.json"), "--no-browser", *args)

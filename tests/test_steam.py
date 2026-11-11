@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import os
 import threading
 import time
@@ -11,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from lightninglan import steam as steam_module
+from lightninglan.peers import parse_steam_copying
+from lightninglan.pieces import hash_file
 from lightninglan.steam import (
     SteamLibrary,
     dump_vdf,
@@ -236,11 +240,69 @@ def test_walk_skips_names_other_computers_cant_save(tmp_path):
 
 def test_file_list_entries_are_checked():
     sha = "ab" * 32
-    assert _file_entry({"p": "Data/x.bin", "s": 3, "h": sha, "x": 1}) == ("Data/x.bin", 3, sha, True)
+    assert _file_entry({"p": "Data/x.bin", "s": 3, "h": sha, "x": 1}) == ("Data/x.bin", 3, sha, True, None)
+    big = 5 * 1024 * KB  # five pieces
+    pieces = os.urandom(5 * 32)
+    ph = base64.b64encode(pieces).decode()
+    assert _file_entry({"p": "big.pak", "s": big, "h": sha, "ph": ph}) == ("big.pak", big, sha, False, pieces)
+    assert _file_entry({"p": "small", "s": 3, "h": sha, "ph": ph})[4] is None  # one piece: copied whole anyway
     for bad in ({"p": "../x", "s": 1, "h": sha}, {"p": "C:/x", "s": 1, "h": sha}, {"p": "/x", "s": 1, "h": sha},
                 {"p": "a", "s": -1, "h": sha}, {"p": "a", "s": 1, "h": "nope"}, {"p": "a/b:c", "s": 1, "h": sha},
-                {"p": "x.lightninglan-part", "s": 1, "h": sha}, "x", None):
+                {"p": "x.lightninglan-part", "s": 1, "h": sha}, "x", None,
+                {"p": "big.pak", "s": big, "h": sha, "ph": ph[:-8]}, {"p": "big.pak", "s": big, "h": sha, "ph": "!!"},
+                {"p": "big.pak", "s": big, "h": sha, "ph": 7}):
         assert _file_entry(bad) is None
+
+
+def test_big_files_are_listed_with_piece_hashes(tmp_path, monkeypatch):
+    monkeypatch.setattr(steam_module, "PIECED_SIZE", 2 * 1024 * KB)
+    root = make_steam(tmp_path / "Steam")
+    files = game_files()  # Data/pak0.pak is just over 3 MiB: four pieces
+    folder = add_game(root, 100, "Alpha", files)
+    library = SteamLibrary(root, tmp_path / "cache.json", sharing=True)
+    library.scan()
+    listed = {f["p"]: f for f in wait_list(library, 100)}
+    sha, digests = hash_file(folder / "Data" / "pak0.pak")
+    assert listed["Data/pak0.pak"]["h"] == sha and base64.b64decode(listed["Data/pak0.pak"]["ph"]) == digests
+    assert all("ph" not in f for p, f in listed.items() if p != "Data/pak0.pak")
+
+    # The cache keeps them. A cache from 1.6, without piece hashes, has big files hashed again.
+    calls = []
+    real = steam_module.hash_file
+    monkeypatch.setattr(steam_module, "hash_file", lambda *a: calls.append(a) or real(*a))
+    again = SteamLibrary(root, tmp_path / "cache.json", sharing=True)
+    again.scan()
+    assert {f["p"]: f for f in wait_list(again, 100)} == listed and calls == []
+    cache = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
+    cache["files"] = {k: v[:3] for k, v in cache["files"].items()}
+    (tmp_path / "cache.json").write_text(json.dumps(cache), encoding="utf-8")
+    old = SteamLibrary(root, tmp_path / "cache.json", sharing=True)
+    old.scan()
+    assert {f["p"]: f for f in wait_list(old, 100)} == listed and len(calls) == 1
+
+
+def test_file_list_pages_are_cut_by_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(steam_module, "PIECED_SIZE", 1024 * KB + 1)
+    monkeypatch.setattr(steam_module, "PAGE_PIECE_BYTES", 1)  # one big file a page
+    root = make_steam(tmp_path / "Steam")
+    files = {f"Data/pak{i}.pak": os.urandom(1024 * KB + 1 + i) for i in range(3)}
+    add_game(root, 100, "Alpha", files)
+    library = SteamLibrary(root, None, sharing=True)
+    library.scan()
+    listed = wait_list(library, 100)
+    assert sorted(f["p"] for f in listed) == sorted(files)
+    first = library.file_list(100, 0)
+    assert len(first["files"]) == 1 and first["listed"] == 3 and not first["complete"]
+
+
+def test_which_games_a_peer_is_copying():
+    good = {"steam": {"v": 1, "os": "windows", "games": [],
+                      "copying": [{"appid": 100, "buildid": "77"}, {"appid": 200, "buildid": "8"}]}}
+    assert parse_steam_copying(good) == {(100, "77"), (200, "8")}
+    for bad in ({}, {"steam": None}, {"steam": {"copying": "x"}},
+                {"steam": {"copying": [{"appid": "100", "buildid": "77"}, {"appid": 0, "buildid": "1"},
+                                       {"appid": 100, "buildid": "seven"}, {"appid": True, "buildid": "1"}, 5]}}):
+        assert parse_steam_copying(bad) == frozenset()
 
 
 def test_lan_routes(tmp_path):
@@ -263,6 +325,7 @@ def test_lan_routes(tmp_path):
     assert r.status_code == 206 and r.content == files["Data/pak0.pak"][10:20]
     assert peer.get("/api/steam/100/..%2F..%2Flibraryfolders.vdf", client=LAN_CLIENT).status_code == 404
     assert peer.get("/api/steam/200", client=LAN_CLIENT).status_code == 404
+    assert peer.get("/api/steam-copy/100", client=LAN_CLIENT).status_code == 404  # it isn't getting the game
     # The Steam button and getting games are for this computer only.
     assert peer.get("/api/my-steam", client=LAN_CLIENT).status_code == 403
     assert peer.post("/api/my-steam/share", client=LAN_CLIENT, json={"on": False},
@@ -353,3 +416,39 @@ def test_pause_resume_and_cancel_a_game(spawn, tmp_path):
     assert b.post(f"/api/downloads/{other['id']}/cancel").json()["status"] == "canceled"
     assert not (b_steam / "steamapps" / "common" / "Other Game").exists()
     assert not (b_steam / "steamapps" / "appmanifest_200.acf").exists()
+
+
+@pytest.mark.integration
+def test_peers_getting_the_same_game_pass_it_on(spawn, tmp_path):
+    # A's upload is slow. B and C get the game at the same time: what one of them has, the other gets
+    # from it, small files whole and the big one (with piece hashes) piece by piece.
+    files = {f"Data/{i:02}.dat": os.urandom(512 * KB) for i in range(24)}
+    files["Data/big.pak"] = os.urandom(steam_module.PIECED_SIZE + 5 * 1024 * KB)
+    size = sum(map(len, files.values()))
+    a_steam = make_steam(tmp_path / "A Steam")
+    add_game(a_steam, 100, "Swarm Game", files)
+    b_steam, c_steam = make_steam(tmp_path / "B Steam"), make_steam(tmp_path / "C Steam")
+    a = spawn("A", start=False, extra_args=("--steam-dir", str(a_steam), "--max-upload-rate", "8"))
+    b = spawn("B", start=False, extra_args=("--steam-dir", str(b_steam)))
+    c = spawn("C", start=False, extra_args=("--steam-dir", str(c_steam)))
+    start_together(a, b, c)
+    assert a.post("/api/my-steam/share", json={"on": True}).json()["shared"] == 1
+    for p in (b, c):
+        wait_for(lambda p=p: p.get("/api/common").json()["games"], timeout=60, message=f"{p.name} to list the game")
+
+    ids = {p.name: p.post("/api/my-steam/get", json={"appid": 100}).json()["id"] for p in (b, c)}
+    done = {p.name: wait_download(p, ids[p.name], timeout=180) for p in (b, c)}
+    for p, steam_dir in ((b, b_steam), (c, c_steam)):
+        d = done[p.name]
+        assert d["status"] == "completed", (d["error"], d["note"])
+        folder = steam_dir / "steamapps" / "common" / "Swarm Game"
+        for rel, data in files.items():
+            assert sha256_of(folder / rel) == hashlib.sha256(data).hexdigest(), (p.name, rel)
+        assert not list(folder.rglob("*.lightninglan-part"))
+    from_c = next((x["bytes"] for x in done["B"]["peers"] if x["peer_id"] == c.peer_id), 0)
+    from_b = next((x["bytes"] for x in done["C"]["peers"] if x["peer_id"] == b.peer_id), 0)
+    sent_by_a = a.get("/api/status").json()["uploaded_bytes"]
+    assert from_b > 0 and from_c > 0, (from_b, from_c)
+    assert sent_by_a < 1.5 * size, f"A sent {sent_by_a / size:.2f}x the game for two copies"
+    print(f"two copies of {size / 1024 / KB:.0f} MiB: A sent {sent_by_a / size:.2f}x, "
+          f"B got {from_c / 1024 / KB:.0f} MiB from C, C got {from_b / 1024 / KB:.0f} MiB from B")

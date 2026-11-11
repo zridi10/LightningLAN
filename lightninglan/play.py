@@ -33,6 +33,7 @@ from .games import (
     replay_battle, replay_board, replay_race, replay_rounds, replay_turns, seal, seal_fleet, sentence_for,
     ship_cells,
 )
+from .netutil import tls_context
 from .pathsafe import display_name
 from .peers import PeerTable
 
@@ -302,7 +303,7 @@ class Arcade:
     # ----- lifecycle --------------------------------------------------------------------------
 
     async def start(self) -> None:
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False)
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False, verify=tls_context())
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
@@ -850,6 +851,9 @@ class Arcade:
             if etag:
                 headers["If-None-Match"] = etag
             async with self._client.stream("GET", base_url + path, headers=headers) as resp:
+                if resp.status_code == 304:
+                    await resp.aread()  # empty, but unread httpx closes the connection instead of reusing it
+                    return
                 if resp.status_code != 200:
                     return
                 if not self.auth.verify_response(headers, resp.headers):

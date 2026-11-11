@@ -13,7 +13,7 @@ from starlette.requests import ClientDisconnect
 
 from .fsutil import format_size, free_space, move_without_overwrite
 from .indexer import is_ignored_name
-from .pathsafe import UnsafePathError, is_within, safe_join, split_relative
+from .pathsafe import UnsafePathError, is_within, resolve, safe_join, split_relative
 
 WRITE_BUFFER = 1024 * 1024
 TEMP_PREFIX = ".lightninglan-upload-"
@@ -29,13 +29,13 @@ async def receive_upload(request: Request, share_dir: Path, name: str, mtime_ms:
     if any(is_ignored_name(p) for p in parts):
         raise HTTPException(400, "Hidden and temporary files (names starting with '.' or ending in .tmp/.part) are not shared.")
 
-    root = share_dir.resolve()
+    root = resolve(share_dir)
     directory = target.parent
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise HTTPException(409, f"Cannot create folder {'/'.join(parts[:-1])}: {exc.strerror or exc}.") from exc
-    if not is_within(directory.resolve(), root):
+    if not is_within(resolve(directory), root):
         raise HTTPException(400, "Invalid file name: path escapes the shared folder.")
 
     expected = request.headers.get("content-length")

@@ -14,6 +14,7 @@ from pathlib import Path
 from . import __version__
 from .auth import Authenticator, derive_key
 from .common import merge_common_space, merge_games
+from .compress import Compressibility
 from .config import MAX_NAME_LENGTH, ConfigError, Settings, prepare_folder, update_config_file
 from .desktop import folder_picker_available
 from .discovery import Discovery
@@ -25,7 +26,7 @@ from .netutil import lan_addresses
 from .peers import PeerTable
 from .play import TITLES as GAME_TITLES, Arcade
 from .pieces import PieceInfo
-from .serving import UploadLimiter
+from .serving import RateLimiter, SeedLedger, UploadLimiter
 from .steam import STEAM_OS, SteamLibrary
 from .steamget import GameDownloads
 from .transfers import PAUSED, DownloadManager
@@ -53,13 +54,17 @@ class Node:
         )
         self.peers = PeerTable(settings.peer_id, self.auth, settings.refresh_interval)
         self.peers.on_polled = self._check_name
-        self.downloads = DownloadManager(settings.downloads_dir, self.auth, self.peers)
+        self.downloads = DownloadManager(settings.downloads_dir, self.auth, self.peers,
+                                         RateLimiter(settings.max_download_rate))
         self.steam = SteamLibrary(settings.steam_dir, settings.state_dir / "steam_hash_cache.json",
                                   sharing=settings.steam_share)
-        self.games = GameDownloads(self.steam, self.auth, self.peers)  # Steam games got from other peers
+        # Steam games got from other peers; their big files are passed on through the downloads' swarm.
+        self.games = GameDownloads(self.steam, self.auth, self.peers, self.downloads)
         self.arcade = Arcade(settings.peer_id, lambda: self.settings.name, self.auth, self.peers,
                              settings.refresh_interval)
         self.uploads = UploadLimiter(settings.max_upload_rate)
+        self.seeding = SeedLedger()  # what we've sent of our files, so the swarm gets each piece once
+        self.packing = Compressibility()  # which files are worth compressing for peers that take it
         self.discovery: Discovery | None = None
         if settings.discovery:
             self.discovery = Discovery(
@@ -272,7 +277,9 @@ class Node:
     def files_payload(self) -> tuple[bytes, str]:
         """The JSON body and ETag for GET /api/files, cached per index and swarm version."""
         snap = self.indexer.snapshot
-        key = (snap.version, self.downloads.swarm_version, self.steam.version)
+        copying = self.games.copying()
+        key = (snap.version, self.downloads.swarm_version, self.steam.version,
+               tuple((c["appid"], c["buildid"]) for c in copying))
         cached = self._files_cache
         if cached is not None and cached[0] == key:
             return cached[1], cached[2]
@@ -289,6 +296,9 @@ class Node:
             "name_auto": self.settings.name_generated,  # made-up names give way when two peers share one
         }
         steam = self.steam.listing()
+        if copying:  # the games being got here: what's copied is passed on, /api/steam-copy/ (1.7+)
+            steam = steam or {"v": 1, "os": STEAM_OS, "games": []}
+            steam["copying"] = copying
         if steam is not None:
             payload["steam"] = steam  # the Steam games shared, served from /api/steam/ (LightningLAN 1.6+)
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")

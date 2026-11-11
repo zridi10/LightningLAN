@@ -164,7 +164,7 @@ def create_app(node: Node) -> FastAPI:
 
     @app.api_route("/api/download/{file_id}", methods=["GET", "HEAD"])
     def download_file(file_id: str, request: Request) -> Response:
-        return serve_download(node.indexer, file_id, request, node.uploads)
+        return serve_download(node.indexer, file_id, request, node.uploads, node.seeding, node.packing)
 
     @app.get("/api/games")
     def published_games(request: Request) -> Response:
@@ -190,8 +190,8 @@ def create_app(node: Node) -> FastAPI:
         return JSONResponse(status, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/piece/{file_id}/{index}")
-    def swarm_piece(file_id: str, index: int) -> Response:
-        return serve_piece(node.downloads, file_id, index, node.uploads)
+    def swarm_piece(file_id: str, index: int, request: Request) -> Response:
+        return serve_piece(node.downloads, file_id, index, node.uploads, request, node.packing)
 
     @app.get("/api/steam/{appid}")
     def steam_file_list(appid: int, since: int = 0) -> Response:
@@ -203,7 +203,21 @@ def create_app(node: Node) -> FastAPI:
 
     @app.get("/api/steam/{appid}/{path:path}")
     def steam_file(appid: int, path: str, request: Request) -> Response:
-        return serve_game_file(node.steam, appid, path, request, node.uploads)
+        found = node.steam.open_file(appid, path)
+        if found == "not_found":
+            found = node.games.open_file(appid, path)  # a game we're getting: the files copied so far
+        name = path.rsplit("/", 1)[-1]
+        kind = name.rpartition(".")[2].lower() if "." in name else ""
+        return serve_game_file(found, request, node.uploads, node.seeding, f"steam:{appid}:{path}", node.packing,
+                               f"steam:{appid}:.{kind}")  # whether to compress: learned per kind of file
+
+    @app.get("/api/steam-copy/{appid}")
+    def steam_copy(appid: int, since: int = 0) -> Response:
+        """What this peer has copied so far of a game it is getting, for others getting it too (steamget.py)."""
+        payload = node.games.copy_status(appid, since)
+        if payload is None:
+            return JSONResponse({"error": "not_found", "detail": "This peer isn't getting that game."}, status_code=404)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     # ----- local web UI -----------------------------------------------------------------
 

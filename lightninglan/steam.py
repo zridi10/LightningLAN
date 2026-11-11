@@ -10,12 +10,15 @@ owns it. steamget.py does that copying.
 With sharing on, the fully installed games are listed in GET /api/files (under "steam"). A peer
 that wants one reads its file list, GET /api/steam/<appid>: the files are hashed (SHA-256) the
 first time someone asks, in the background, and the list grows as they are, so the copy can start
-at once. The hashes are kept in steam_hash_cache.json, so a game is only hashed again when it
-changes. The files themselves come from GET /api/steam/<appid>/<path>.
+at once. Files of PIECED_SIZE or more are listed with the hashes of their pieces too (pieces.py),
+so peers copying one at the same time can pass pieces to each other. The hashes are kept in
+steam_hash_cache.json, so a game is only hashed again when it changes. The files themselves come
+from GET /api/steam/<appid>/<path>.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -30,7 +33,8 @@ from typing import Iterator
 
 from .fsutil import long_path
 from .indexer import is_junction
-from .pathsafe import UnsafePathError, display_name, safe_join, validate_component
+from .pathsafe import UnsafePathError, display_name, plain, safe_join, validate_component
+from .pieces import hash_file
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +47,8 @@ else:
 
 SCAN_INTERVAL = 30.0  # how often the libraries are read again (a few small text files)
 PAGE_SIZE = 5000  # files per GET /api/steam/<appid> answer; the rest comes with ?since=
+PAGE_PIECE_BYTES = 4 * 1024 * 1024  # and at most about this much piece-hash text per answer
+PIECED_SIZE = 64 * 1024 * 1024  # files this big are listed with piece hashes, smaller ones are copied whole
 PART_SUFFIX = ".lightninglan-part"  # a file being copied into a game's folder (steamget.py)
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_JOBS = 16  # games whose file lists are kept in memory
@@ -229,7 +235,7 @@ def same_folder(a: Path, b: Path) -> bool:
 
 
 def _folder_key(path: Path) -> str:
-    return os.path.normcase(os.path.realpath(path))
+    return os.path.normcase(plain(os.path.realpath(path)))
 
 
 def library_folders(steam_dir: Path) -> list[Path]:
@@ -413,7 +419,7 @@ def walk_game(folder: Path, abort: threading.Event) -> tuple[list[tuple[str, str
     sorted, the empty folders, and how many files were left out because their names would not work on
     every computer. Linked folders are not entered."""
     root = long_path(folder)
-    real_root = os.path.normcase(os.path.realpath(root))
+    real_root = os.path.normcase(plain(os.path.realpath(root)))
     files: list[tuple[str, str, int, int, bool]] = []
     has_children: dict[str, bool] = {}
     skipped = 0
@@ -440,7 +446,8 @@ def walk_game(folder: Path, abort: threading.Event) -> tuple[list[tuple[str, str
                 try:
                     if entry.is_symlink():
                         target = os.path.realpath(entry.path)
-                        if not os.path.normcase(target).startswith(real_root + os.sep) or not os.path.isfile(target):
+                        inside = os.path.normcase(plain(target)).startswith(real_root + os.sep)
+                        if not inside or not os.path.isfile(target):
                             continue
                         st = os.stat(target)
                     elif entry.is_dir(follow_symlinks=False):
@@ -477,29 +484,35 @@ def sha256_file(path: str, abort: threading.Event | None = None) -> str:
 
 
 class HashCache:
-    """SHA-256 of game files by path, kept while their size and modification time stay the same."""
+    """SHA-256 of game files by path (and their piece hashes, for big ones), kept while their size and
+    modification time stay the same."""
 
     def __init__(self, path: Path | None):
         self.path = path
-        self._files: dict[str, tuple[int, int, str]] = {}
+        self._files: dict[str, tuple[int, int, str, str]] = {}
         self._dirty = False
         self._lock = threading.Lock()
         if path is not None and path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 for key, v in data.get("files", {}).items():
-                    if isinstance(v, list) and len(v) == 3:
-                        self._files[key] = (int(v[0]), int(v[1]), str(v[2]))
+                    if isinstance(v, list) and len(v) in (3, 4):
+                        self._files[key] = (int(v[0]), int(v[1]), str(v[2]), str(v[3]) if len(v) == 4 else "")
             except (OSError, ValueError, TypeError, AttributeError) as exc:
                 log.warning("ignoring unreadable Steam hash cache %s: %s", path, exc)
 
-    def get(self, path: str, size: int, mtime_ns: int) -> str | None:
+    def get(self, path: str, size: int, mtime_ns: int) -> tuple[str, str] | None:
+        """(SHA-256, piece hashes in base64 or "") of the file, if it hasn't changed since."""
         found = self._files.get(path)
-        return found[2] if found is not None and found[:2] == (size, mtime_ns) else None
+        if found is None or found[:2] != (size, mtime_ns):
+            return None
+        if size >= PIECED_SIZE and not found[3]:
+            return None  # hashed by LightningLAN 1.6, which didn't keep piece hashes
+        return found[2], found[3]
 
-    def put(self, path: str, size: int, mtime_ns: int, sha256: str) -> None:
+    def put(self, path: str, size: int, mtime_ns: int, sha256: str, pieces: str = "") -> None:
         with self._lock:
-            self._files[path] = (size, mtime_ns, sha256)
+            self._files[path] = (size, mtime_ns, sha256, pieces)
             self._dirty = True
 
     def save(self, keep: list[Path]) -> None:
@@ -564,8 +577,12 @@ class FileList:
         game = self.game
         with self._lock:
             since = max(0, min(since, len(self._files)))
-            files = self._files[since:since + PAGE_SIZE]
-            complete = self._complete and since + len(files) == len(self._files)
+            end, budget = since, PAGE_PIECE_BYTES
+            while end < len(self._files) and end - since < PAGE_SIZE and budget > 0:
+                budget -= len(self._files[end].get("ph", ""))
+                end += 1
+            files = self._files[since:end]
+            complete = self._complete and end == len(self._files)
             return {
                 "appid": game.appid,
                 "name": game.name,
@@ -609,10 +626,12 @@ class FileList:
                             self._total_files -= 1
                             self._total_bytes -= listed_size
                         continue
-                    sha, size, mtime_ns = hashed
+                    sha, pieces, size, mtime_ns = hashed
                     entry = {"p": rel, "s": size, "h": sha}
                     if executable:
                         entry["x"] = 1
+                    if pieces:
+                        entry["ph"] = pieces
                     with self._lock:
                         self._files.append(entry)
                         self.records[rel] = (size, mtime_ns)
@@ -632,22 +651,26 @@ class FileList:
             with self._lock:
                 self._error = f"Could not read {game.name} on this computer: {exc}"
 
-    def _hash(self, path: str, size: int, mtime_ns: int) -> tuple[str, int, int] | None:
-        """The file's (SHA-256, size, mtime_ns), or None if it keeps changing (a log the running game
-        writes to, say)."""
+    def _hash(self, path: str, size: int, mtime_ns: int) -> tuple[str, str, int, int] | None:
+        """The file's (SHA-256, piece hashes in base64 or "", size, mtime_ns), or None if it keeps
+        changing (a log the running game writes to, say)."""
         cached = self._cache.get(path, size, mtime_ns)
         if cached is not None:
-            return cached, size, mtime_ns
+            return *cached, size, mtime_ns
         for _ in range(3):
             try:
-                sha = sha256_file(path, self._abort)
+                if size >= PIECED_SIZE:
+                    sha, digests = hash_file(Path(path), self._abort)  # one pass for both
+                    pieces = base64.b64encode(digests).decode("ascii")
+                else:
+                    sha, pieces = sha256_file(path, self._abort), ""
                 st = os.stat(path)
             except OSError as exc:
                 log.debug("skipping %s: %s", path, exc)
                 return None
             if (st.st_size, st.st_mtime_ns) == (size, mtime_ns):
-                self._cache.put(path, size, mtime_ns, sha)
-                return sha, size, mtime_ns
+                self._cache.put(path, size, mtime_ns, sha, pieces)
+                return sha, pieces, size, mtime_ns
             size, mtime_ns = st.st_size, st.st_mtime_ns
         return None
 

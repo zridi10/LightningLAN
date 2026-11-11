@@ -16,6 +16,8 @@ from typing import BinaryIO
 
 import httpx
 
+from .netutil import tls_context
+
 LOCK_FILE = "lightninglan.lock"
 INSTANCE_FILE = "instance.json"
 
@@ -105,7 +107,7 @@ def _probe(info_path: Path) -> str | None:
     except (OSError, ValueError, KeyError, TypeError):
         return None  # not written yet
     try:
-        r = httpx.get(f"http://127.0.0.1:{port}/api/status", timeout=2.0, trust_env=False)
+        r = httpx.get(f"http://127.0.0.1:{port}/api/status", timeout=2.0, trust_env=False, verify=tls_context())
         if r.status_code == 200 and r.json().get("peer_id") == peer_id:
             return f"http://localhost:{port}"
     except (httpx.HTTPError, ValueError, AttributeError):

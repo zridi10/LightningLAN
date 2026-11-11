@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
 
-from .pathsafe import is_within
+from .pathsafe import is_within, resolve
 from .pieces import PieceInfo, hash_file, swarmable
 
 log = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class IndexSnapshot:
 
 class Indexer:
     def __init__(self, root: Path, cache_path: Path | None = None, interval: float = 5.0):
-        self.root = Path(root).resolve()
+        self.root = resolve(Path(root))
         self.cache_path = cache_path
         self.interval = interval
         self.hash_count = 0  # files hashed since start (diagnostics and tests)
@@ -130,7 +130,7 @@ class Indexer:
         """Share a different folder: the index empties at once and the new folder is scanned."""
         with self._publish_lock:
             self._generation += 1
-            self.root = Path(root).resolve()
+            self.root = resolve(Path(root))
             self._abort.set()
             self._publish_locked({}, {}, pending=0)
         self._wake.set()
@@ -250,7 +250,7 @@ class Indexer:
                         if _is_hidden_on_windows(entry):
                             continue
                         if entry.is_symlink():
-                            target = Path(entry.path).resolve()
+                            target = resolve(Path(entry.path))
                             if not is_within(target, root) or not target.is_file():
                                 continue
                             st = target.stat()

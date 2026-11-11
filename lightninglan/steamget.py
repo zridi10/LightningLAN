@@ -7,33 +7,54 @@ in steamapps/common/<installdir>. Steam's manifest for the game (steam.portable_
 written last, so Steam never sees a half-copied game: from then on it is in the library the next
 time Steam starts.
 
+Peers getting the same build at the same time pass on what they have, as swarm downloads do
+(swarm.py). Each one publishes the files it has copied (GET /api/steam-copy/<appid>) and serves
+them like a sharer would; big files (steam.PIECED_SIZE and up) are copied in pieces by a swarm
+session, so their pieces travel between the peers copying them too. To spread the files only the
+sharers have, each peer takes them in its own order, and leaves a small file another peer is
+fetching right now to get from that peer once it's there.
+
 Files already in the game's folder that match (from a copy that was paused, or one Steam left
 behind) are kept, so a copy carries on where it stopped. Cancel deletes what this copy put there.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import os
+import random
 import re
+import stat
 import threading
 import time
 import uuid
+import zlib
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import httpx
 
 from .auth import Authenticator
+from .compress import COMPRESS_HEADER, ZSTD, Body
+from .netutil import tls_context
 from .fsutil import format_size, free_space, long_path
 from .pathsafe import UnsafePathError, display_name, safe_join, split_relative, validate_component
 from .peers import Peer, PeerTable, RemoteGame, describe_http_error
+from .pieces import DIGEST_SIZE, PieceInfo, piece_count, swarmable
+from .serving import RateLimiter
 from .steam import PAGE_SIZE, PART_SUFFIX, STEAM_OS, SteamLibrary, portable_manifest, same_folder, sha256_file
+from .swarm import (InOrderHasher, SwarmFailed, SwarmSession, SwarmState, SwarmStopped, SwarmUnusable, open_partial,
+                    scan_partial)
 from .transfers import ACTIVE_STATES, CANCELED, COMPLETED, DOWNLOADING, FAILED, PAUSED, QUEUED, DownloadError
+
+if TYPE_CHECKING:
+    from .transfers import DownloadManager
 
 log = logging.getLogger(__name__)
 
@@ -42,14 +63,21 @@ MAX_ACTIVE_GAMES = 2  # more wait their turn as "queued"
 CHUNK = 512 * 1024
 READ_TIMEOUT = 15.0
 LIST_POLL = 1.0  # how often a file list that is still growing is read again
+FELLOW_POLL = 0.25  # how often other peers getting the game are asked what they have and are fetching
 MAX_LIST_BYTES = 16 * 1024 * 1024
 MAX_FILES = 1_000_000
 SOURCE_RETRY = 10.0  # a peer that failed is asked again after this long
 NO_SOURCE_WAIT = 30.0  # how long a copy waits for someone sharing the game to come back
+FELLOW_TIMEOUT = 3.0  # for reading what another peer getting the game has copied
+MAX_FETCHING = 64  # files a peer says it is fetching right now
+SKIP_BUSY = 64  # files fetched by others passed over, at most, to find one nobody is fetching
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 DONE_NOTE = "Start Steam, or restart it if it's open, and the game is in your library."
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OS_NAMES = {"windows": "Windows", "linux": "Linux", "mac": "Mac"}
+
+# A file of the game to copy: (relpath, size, SHA-256, executable, piece hashes or None).
+_Entry = tuple[str, int, str, bool, "bytes | None"]
 
 
 class _Stop(Exception):
@@ -89,6 +117,11 @@ class GameDownload:
     contributors: dict[str, list] = field(default_factory=dict, repr=False)  # peer_id -> [name, bytes sent]
     done: dict[str, str] = field(default_factory=dict, repr=False)  # relpath -> SHA-256, files in place
     written: set[str] = field(default_factory=set, repr=False)  # the files this copy put there
+    # For other peers getting the game: the files in place in the order they were done, the (size,
+    # mtime_ns) each had then (one that changed since isn't passed on), and the ones being fetched.
+    done_log: list[tuple[str, str]] = field(default_factory=list, repr=False)
+    stamps: dict[str, tuple[int, int]] = field(default_factory=dict, repr=False)
+    fetching: tuple[str, ...] = ()
 
     @property
     def folder(self) -> Path | None:
@@ -129,10 +162,13 @@ class GameDownload:
 
 
 class GameDownloads:
-    def __init__(self, steam: SteamLibrary, auth: Authenticator, peers: PeerTable):
+    def __init__(self, steam: SteamLibrary, auth: Authenticator, peers: PeerTable,
+                 swarm: DownloadManager | None = None):
         self.steam = steam
         self.auth = auth
         self.peers = peers
+        self.swarm = swarm  # where big files being copied are registered, so their pieces are passed on
+        self.limiter = swarm.limiter if swarm is not None else RateLimiter()  # shared with the downloads
         self._downloads: dict[str, GameDownload] = {}
         self._stops: dict[str, threading.Event] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -168,6 +204,55 @@ class GameDownloads:
             if game is not None and (buildid is None or game.buildid == buildid):
                 found.append((peer, game))
         return found
+
+    def fellows(self, appid: int, buildid: str) -> list[Peer]:
+        """Online peers getting the same build of the game for this kind of computer."""
+        return [p for p in self.peers.online() if p.steam_os == STEAM_OS and (appid, buildid) in p.steam_copying]
+
+    # ----- passing on what we've copied (LAN routes) -----------------------------------------
+
+    def copying(self) -> list[dict]:
+        """For GET /api/files: the games we pass files of, while getting them and once got (still listed)."""
+        found = {(d.appid, d.buildid) for d in list(self._downloads.values())
+                 if d.buildid is not None and d.status in (DOWNLOADING, COMPLETED)}
+        return [{"appid": appid, "buildid": buildid} for appid, buildid in sorted(found)]
+
+    def _passing_on(self, appid: int) -> GameDownload | None:
+        for d in list(self._downloads.values()):
+            if d.appid == appid and d.buildid is not None and d.status in (DOWNLOADING, COMPLETED):
+                return d
+        return None
+
+    def copy_status(self, appid: int, since: int = 0) -> dict | None:
+        """GET /api/steam-copy/<appid>: the files of the game copied so far, from number `since` on, and
+        the ones being fetched now. None if we aren't getting the game."""
+        d = self._passing_on(appid)
+        if d is None:
+            return None
+        done = d.done_log
+        since = max(0, min(since, len(done)))
+        files = [{"p": rel, "h": sha} for rel, sha in done[since:since + PAGE_SIZE]]
+        return {"appid": appid, "id": d.id, "buildid": d.buildid, "since": since, "files": files,
+                "next": since + len(files), "fetching": list(d.fetching[:MAX_FETCHING])}
+
+    def open_file(self, appid: int, relpath: str) -> tuple[Path, int, int] | str:
+        """A file we have copied, to send to another peer getting the game, as SteamLibrary.open_file:
+        (path, size, mtime_ns), "not_found", or "changed" (not the file that was copied any more)."""
+        d = self._passing_on(appid)
+        folder = d.folder if d is not None else None
+        stamp = d.stamps.get(relpath) if d is not None else None
+        if folder is None or stamp is None:
+            return "not_found"
+        try:
+            path = safe_join(folder, relpath)
+            st = os.stat(long_path(path))
+        except (UnsafePathError, OSError):
+            return "not_found"
+        if not stat.S_ISREG(st.st_mode):
+            return "not_found"
+        if (st.st_size, st.st_mtime_ns) != stamp:
+            return "changed"
+        return path, st.st_size, st.st_mtime_ns
 
     def start(self, appid: int, library: str | None = None, peer_id: str | None = None) -> GameDownload:
         if not self.steam.found:
@@ -360,6 +445,8 @@ class GameDownloads:
                 pass
         d.written.clear()
         d.done.clear()
+        d.done_log.clear()
+        d.stamps.clear()
         for directory, _dirs, names in os.walk(long_path(folder), topdown=False):
             for name in names:
                 if name.endswith(PART_SUFFIX):
@@ -387,7 +474,17 @@ class _Copy:
         self.listed = 0  # entries of its list read so far
         self.complete = False
         self.seen: dict[str, str] = {}  # relpath -> SHA-256, every file the list has named
-        self.queue: deque[tuple[str, int, str, bool]] = deque()
+        self.pending: dict[str, _Entry] = {}  # relpath -> entry, the files still to copy
+        self.order: deque[str] = deque()  # the order this peer takes them in (its own: see _take)
+        self.ready: deque[str] = deque()  # pending files another peer getting the game has copied
+        self.rng = random.Random(f"{manager.peers.own_peer_id}:{d.appid}")
+        # Other peers getting the same build: who they are, which files they have (relpath ->
+        # {peer_id: SHA-256}) and are fetching, and (their download's id, how much of its list was read).
+        self.fellows: dict[str, Peer] = {}
+        self.held: dict[str, dict[str, str]] = {}
+        self.fellow_fetching: dict[str, frozenset[str]] = {}
+        self.fellow_read: dict[str, tuple[str, int]] = {}
+        self.client: httpx.Client | None = None  # for file lists, from this run's main thread
         self.busy = 0
         self.closing = False
         self.failure: Exception | None = None
@@ -404,23 +501,36 @@ class _Copy:
         d.received = 0
 
     def run(self) -> None:
+        self.client = httpx.Client(timeout=httpx.Timeout(READ_TIMEOUT, connect=5.0), trust_env=False,
+                                   verify=tls_context())
+        try:
+            self._run()
+        finally:
+            self.client.close()
+
+    def _run(self) -> None:
         self._read_list()
+        self._poll_fellows()
         workers = [threading.Thread(target=self._work, name=f"steam-get-{self.d.appid}-{i}", daemon=True)
                    for i in range(WORKERS)]
         for worker in workers:
             worker.start()
         try:
-            next_read = time.monotonic() + LIST_POLL
+            next_read = next_fellows = time.monotonic() + FELLOW_POLL
             while True:
                 with self.cond:
                     if self.failure is not None or self.stop.is_set():
                         break
-                    if self.complete and not self.queue and not self.busy:
+                    if self.complete and not self.pending and not self.busy:
                         break
-                    self.cond.wait(0.25)
-                if not self.complete and time.monotonic() >= next_read:
+                    self.cond.wait(FELLOW_POLL / 2)
+                now = time.monotonic()
+                if not self.complete and now >= next_read:
                     self._read_list()
                     next_read = time.monotonic() + LIST_POLL
+                if now >= next_fellows:
+                    self._poll_fellows()
+                    next_fellows = time.monotonic() + FELLOW_POLL
                 self._measure_speed()
         finally:
             with self.cond:
@@ -440,8 +550,9 @@ class _Copy:
         """Read what the list has that this copy hasn't seen yet, and queue those files."""
         while True:
             peer, payload = self._fetch_list()
-            files = self._take_list(peer, payload)
-            if self.complete or len(files) < PAGE_SIZE:
+            self._take_list(peer, payload)
+            listed = payload.get("listed")  # how many it has hashed: pages are cut short by size too
+            if self.complete or not isinstance(listed, int) or listed <= self.listed:
                 return  # caught up; the rest comes as it is hashed
 
     def _fetch_list(self) -> tuple[Peer, dict]:
@@ -483,11 +594,12 @@ class _Copy:
         d.source_peer_id, d.source_name = peer.peer_id, peer.name
         return peer
 
-    def _get_json(self, peer: Peer, path: str, params: dict) -> dict:
+    def _get_json(self, peer: Peer, path: str, params: dict, timeout: float = READ_TIMEOUT) -> dict:
+        assert self.client is not None
         headers = self.m.auth.sign_request("GET", path)
         try:
-            with httpx.stream("GET", f"{peer.base_url()}{path}", params=params, headers=headers,
-                              timeout=httpx.Timeout(READ_TIMEOUT, connect=5.0), trust_env=False) as resp:
+            with self.client.stream("GET", f"{peer.base_url()}{path}", params=params, headers=headers,
+                                    timeout=httpx.Timeout(timeout, connect=min(timeout, 5.0))) as resp:
                 if not self.m.auth.verify_response(headers, resp.headers):
                     raise _SourceGone("it failed the passphrase check")
                 if resp.status_code == 404:
@@ -575,11 +687,18 @@ class _Copy:
                 d.note = f"{peer.name} is listing the game's files…"
 
         with self.cond:
-            for rel, size, sha, executable in entries:
+            new = []
+            for entry in entries:
+                rel, sha = entry[0], entry[2]
                 if self.seen.get(rel) == sha:
                     continue
                 self.seen[rel] = sha
-                self.queue.append((rel, size, sha, executable))
+                self.pending[rel] = entry
+                new.append(rel)
+                if sha in self.held.get(rel, {}).values():
+                    self.ready.append(rel)  # another peer getting the game has it already
+            self.rng.shuffle(new)  # each peer its own order: they fetch different files from the sharers
+            self.order.extend(new)
             self.complete = complete
             self.cond.notify_all()
         return files
@@ -622,16 +741,21 @@ class _Copy:
     # ----- copying the files ----------------------------------------------------------------
 
     def _work(self) -> None:
-        client = httpx.Client(timeout=httpx.Timeout(READ_TIMEOUT, connect=5.0), trust_env=False)
+        client = httpx.Client(timeout=httpx.Timeout(READ_TIMEOUT, connect=5.0), trust_env=False, verify=tls_context())
         try:
             while True:
                 with self.cond:
-                    while not self.queue and not self.closing and not self.stop.is_set() and self.failure is None:
+                    while not self.pending and not self.closing and not self.stop.is_set() and self.failure is None:
                         self.cond.wait(0.5)
                     if self.closing or self.stop.is_set() or self.failure is not None:
                         return
-                    entry = self.queue.popleft()
+                    entry = self._take()
+                    if entry is None:
+                        self.cond.wait(0.5)
+                        continue
                     self.busy += 1
+                    self.in_flight[entry[0]] = 0
+                    self.d.fetching = tuple(self.in_flight)
                 try:
                     self._copy_file(client, *entry)
                 except _Stop:
@@ -649,48 +773,207 @@ class _Copy:
                 finally:
                     with self.cond:
                         self.busy -= 1
+                        self.in_flight.pop(entry[0], None)
+                        self.d.fetching = tuple(self.in_flight)
                         self.cond.notify_all()
         finally:
             client.close()
 
-    def _copy_file(self, client: httpx.Client, rel: str, size: int, sha: str, executable: bool) -> None:
-        d = self.d
+    def _take(self) -> _Entry | None:
+        """The next file to copy (with self.cond held): one another peer getting the game has copied, if
+        any, so the sharers' upload goes to the rest; otherwise the next in this peer's own order. The
+        peers getting the game split the small files between them (each takes its share first, the
+        same way on every peer), and a small file another one is fetching is left for later, to get
+        from them. A big one is taken anyway: its pieces are passed on while it is copied."""
+        while self.ready:
+            entry = self.pending.pop(self.ready.popleft(), None)
+            if entry is not None:
+                return entry
+        busy = frozenset().union(*self.fellow_fetching.values())
+        own = self.m.peers.own_peer_id
+        group = sorted({*self.fellows, own})
+        shares, mine = len(group), group.index(own)
+        skipped: list[str] = []
+        entry = None
+        while self.order and len(skipped) < SKIP_BUSY:
+            rel = self.order.popleft()
+            candidate = self.pending.get(rel)
+            if candidate is None:
+                continue  # copied from another peer already
+            if candidate[4] is None and (rel in busy or zlib.crc32(rel.encode()) % shares != mine):
+                skipped.append(rel)
+                continue
+            entry = self.pending.pop(rel)
+            break
+        if entry is None and skipped:
+            # Ours are all taken: help with another's share that nobody is fetching yet, or else fetch
+            # one that someone is, too.
+            rel = next((r for r in skipped if r not in busy), skipped[0])
+            skipped.remove(rel)
+            entry = self.pending.pop(rel)
+        self.order.extend(skipped)
+        return entry
+
+    def _copy_file(self, client: httpx.Client, rel: str, size: int, sha: str, executable: bool,
+                   pieces: bytes | None) -> None:
         try:
             target = safe_join(self.folder, rel)
         except UnsafePathError as exc:
             raise _Failed(f"The file list names a file that can't be saved ({rel}: {exc}).") from exc
         path = long_path(target)
         if self._already_there(rel, path, size, sha):
-            self._file_done(rel, sha, size, wrote=False)
+            self._file_done(rel, sha, path, wrote=False)
             return
         os.makedirs(long_path(target.parent), exist_ok=True)
         if size == 0:
             if sha != EMPTY_SHA256:
                 raise _Failed(f"The file list says {rel} is empty, but its SHA-256 isn't that of an empty file.")
             open(path, "wb").close()
-            self._file_done(rel, sha, size, wrote=True)
+            self._file_done(rel, sha, path, wrote=True)
             return
         part = path + PART_SUFFIX
+        if pieces is None or self.m.swarm is None or not self._swarm_file(rel, size, sha, pieces, part):
+            self._whole_file(client, rel, size, sha, part)
+        _replace(part, path)
+        if executable and os.name != "nt":
+            os.chmod(path, os.stat(path).st_mode | 0o111)
+        self._file_done(rel, sha, path, wrote=True)
+
+    def _whole_file(self, client: httpx.Client, rel: str, size: int, sha: str, part: str) -> None:
+        """Copy the file in one piece from one peer that has it, into `part`."""
         mismatched: dict[str, str] = {}  # peer_id -> name, peers whose copy of it didn't match
         while True:
             if self.stop.is_set():
                 raise _Stop()
-            peer = self._pick_peer(mismatched)
+            peer = self._pick_peer(rel, sha, mismatched)
             if peer is None:
                 continue
             try:
                 ok = self._transfer(client, peer, rel, size, sha, part)
             except _SourceGone as exc:
-                log.info("%s of %s from %s: %s", rel, d.name, peer.name, exc)
+                log.info("%s of %s from %s: %s", rel, self.d.name, peer.name, exc)
                 self.down_until[peer.peer_id] = time.monotonic() + SOURCE_RETRY
                 continue
             if ok:
-                break
+                return
             mismatched[peer.peer_id] = peer.name
-        _replace(part, path)
-        if executable and os.name != "nt":
-            os.chmod(path, os.stat(path).st_mode | 0o111)
-        self._file_done(rel, sha, size, wrote=True)
+
+    def _swarm_file(self, rel: str, size: int, sha: str, pieces: bytes, part: str) -> bool:
+        """Copy a big file in pieces, from every peer that has it and every peer getting it too, into
+        `part`. True when it is all there and matches; False to copy it whole instead."""
+        d = self.d
+        info = PieceInfo(sha, size, pieces)
+        part_path = Path(part)
+        open_partial(part_path, size)
+        try:
+            have = scan_partial(part_path, info, self.stop) if os.path.getsize(part) else None
+        except SwarmStopped:
+            raise _Stop() from None
+        state = SwarmState(info, part_path, have)
+        assert self.m.swarm is not None
+        self.m.swarm.register_swarm(state)  # others getting the game take pieces from us meanwhile
+        session = SwarmSession(
+            state, part_path, self.m.peers.own_peer_id, self.m.peers, self.m.auth,
+            lambda: self._holders(rel, sha), _FileProgress(self, rel), self.stop,
+            seed_path=f"/api/steam/{d.appid}/{rel}", on_bytes=self._counted, limiter=self.m.limiter,
+        )
+        hasher = InOrderHasher(state, part_path)  # the whole file's SHA-256 as it comes, not after
+        hasher.start()
+        try:
+            session.run()
+            ok = hasher.finish(self.stop) == sha
+        except SwarmStopped:
+            raise _Stop() from None
+        except SwarmFailed as exc:
+            if not self.m.sources(d.appid, d.buildid):
+                raise _Failed(self._nobody_left()) from None
+            raise _Failed(f"Copying {rel} of {d.name} stopped: {exc}") from None
+        except SwarmUnusable as exc:
+            log.warning("%s of %s: %s; copying it whole instead", rel, d.name, exc)
+            hasher.close()
+            with state.exclusive():
+                with open(part, "r+b") as f:
+                    f.truncate(state.prefix_bytes())  # keep the verified start to carry on from
+            return False
+        finally:
+            hasher.close()  # before the file is moved, or deleted
+            with state.exclusive():
+                self.m.swarm.unregister_swarm(state)
+        if not ok:
+            log.warning("%s of %s failed its SHA-256 check after a swarm copy; copying it whole", rel, d.name)
+            os.unlink(part)
+            self._progress(rel, 0)
+        return ok
+
+    def _holders(self, rel: str, sha: str) -> list[Peer]:
+        """Every online peer with the whole file: those sharing the game, then those that copied it."""
+        d = self.d
+        found = {p.peer_id: p for p, _ in self.m.sources(d.appid, d.buildid)}
+        with self.cond:
+            for peer_id, held in self.held.get(rel, {}).items():
+                peer = self.fellows.get(peer_id)
+                if held == sha and peer is not None:
+                    found.setdefault(peer_id, peer)
+        return list(found.values())
+
+    # ----- other peers getting the game --------------------------------------------------------
+
+    def _poll_fellows(self) -> None:
+        """Read what the other peers getting this build have copied since the last time."""
+        d = self.d
+        if d.buildid is None:
+            return
+        fellows = {p.peer_id: p for p in self.m.fellows(d.appid, d.buildid)}
+        with self.cond:
+            self.fellows = fellows
+            for gone in set(self.fellow_fetching) - set(fellows):
+                del self.fellow_fetching[gone]
+        for peer in fellows.values():
+            try:
+                self._read_fellow(peer)
+            except _SourceGone as exc:
+                log.debug("what %s has copied of %s: %s", peer.name, d.name, exc)
+                with self.cond:
+                    self.fellow_fetching.pop(peer.peer_id, None)
+
+    def _read_fellow(self, peer: Peer) -> None:
+        d = self.d
+        for _ in range(4):  # a few pages at a time
+            known_id, since = self.fellow_read.get(peer.peer_id, ("", 0))
+            payload = self._get_json(peer, f"/api/steam-copy/{d.appid}", {"since": since}, timeout=FELLOW_TIMEOUT)
+            download_id, files, fetching = payload.get("id"), payload.get("files"), payload.get("fetching")
+            if (payload.get("appid") != d.appid or payload.get("buildid") != d.buildid
+                    or not isinstance(download_id, str) or not isinstance(files, list)
+                    or not isinstance(fetching, list) or payload.get("since") != since
+                    or payload.get("next") != since + len(files)):
+                raise _SourceGone("what it says it has copied doesn't make sense")
+            if download_id != known_id and since:
+                with self.cond:  # it's getting the game afresh: forget what it had, read it all again
+                    for held in self.held.values():
+                        held.pop(peer.peer_id, None)
+                self.fellow_read[peer.peer_id] = (download_id, 0)
+                continue
+            entries = []
+            for item in files:
+                rel, sha = (item.get("p"), item.get("h")) if isinstance(item, dict) else (None, None)
+                if not isinstance(rel, str) or not isinstance(sha, str) or not _SHA256_RE.match(sha):
+                    raise _SourceGone("what it says it has copied doesn't make sense")
+                entries.append((rel, sha))
+            with self.cond:
+                for rel, sha in entries:
+                    if rel not in self.seen and len(self.held) >= len(self.seen) + PAGE_SIZE:
+                        continue  # not in our list (yet): only so many of those are kept
+                    self.held.setdefault(rel, {})[peer.peer_id] = sha
+                    entry = self.pending.get(rel)
+                    if entry is not None and entry[2] == sha:
+                        self.ready.append(rel)
+                self.fellow_fetching[peer.peer_id] = frozenset(
+                    x for x in fetching[:MAX_FETCHING] if isinstance(x, str))
+                self.fellow_read[peer.peer_id] = (download_id, since + len(files))
+                if entries:
+                    self.cond.notify_all()
+            if len(files) < PAGE_SIZE:
+                return
 
     def _already_there(self, rel: str, path: str, size: int, sha: str) -> bool:
         try:
@@ -699,8 +982,8 @@ class _Copy:
             return False
         if st.st_size != size:
             return False
-        if self.d.done.get(rel) == sha:
-            return True  # put there by this download earlier
+        if self.d.done.get(rel) == sha and self.d.stamps.get(rel) == (st.st_size, st.st_mtime_ns):
+            return True  # put there by this download earlier, and not changed since
         try:
             return sha256_file(path, self.stop) == sha
         except InterruptedError:
@@ -708,17 +991,22 @@ class _Copy:
         except OSError:
             return False
 
-    def _pick_peer(self, mismatched: dict[str, str]) -> Peer | None:
-        """The least busy peer to copy a file from, or None after a short wait if there's none right now."""
+    def _pick_peer(self, rel: str, sha: str, mismatched: dict[str, str]) -> Peer | None:
+        """The peer to copy a file from: one getting the game too that has it, sparing the sharers' upload
+        for the files only they have, else the least busy sharer. None after a short wait if there's
+        none right now."""
         d = self.d
         now = time.monotonic()
         sharing = [p for p, _ in self.m.sources(d.appid, d.buildid)]
-        ready = [p for p in sharing if p.peer_id not in mismatched and self.down_until.get(p.peer_id, 0) <= now]
+        sharer_ids = {p.peer_id for p in sharing}
+        ready = [p for p in self._holders(rel, sha)
+                 if p.peer_id not in mismatched and self.down_until.get(p.peer_id, 0) <= now]
         if ready:
             self.last_source = now
             source_id = self.source.peer_id if self.source is not None else None
             with self.cond:
-                return min(ready, key=lambda p: (self.loads.get(p.peer_id, 0), p.peer_id != source_id))
+                return min(ready, key=lambda p: (p.peer_id in sharer_ids, self.loads.get(p.peer_id, 0),
+                                                 p.peer_id != source_id))
         if sharing and all(p.peer_id in mismatched for p in sharing):
             names = ", ".join(mismatched.values())
             raise _Failed(f"The copy of {d.name} on {names} doesn't match its file list ({d.name}'s files may have "
@@ -745,6 +1033,7 @@ class _Copy:
 
         path = f"/api/steam/{self.d.appid}/{rel}"
         headers = self.m.auth.sign_request("GET", path)  # signed as the server reads it: not percent-encoded
+        headers[COMPRESS_HEADER] = ZSTD  # the peer may compress it on the way (compress.py)
         if offset:
             headers["Range"] = f"bytes={offset}-"
         with self.cond:
@@ -769,11 +1058,12 @@ class _Copy:
                 else:
                     raise _SourceGone(f"it answered HTTP {resp.status_code}")
                 received = offset
+                body, counted = Body.of(resp), 0
                 with open(part, "r+b" if offset else "wb", buffering=CHUNK) as f:
                     if offset:
                         f.seek(offset)
                         f.truncate()
-                    for chunk in resp.iter_raw():
+                    for chunk in body:
                         if self.stop.is_set():
                             raise _Stop()
                         if received + len(chunk) > size:
@@ -782,6 +1072,10 @@ class _Copy:
                         digest.update(chunk)
                         received += len(chunk)
                         self._progress(rel, received, peer, len(chunk))
+                        self.m.limiter.consume(body.raw - counted)  # what came over the network
+                        counted = body.raw
+        except ValueError as exc:  # compressed data that doesn't decompress
+            raise _SourceGone(f"it sent data that can't be read: {exc}") from exc
         except httpx.HTTPError as exc:
             raise _SourceGone(describe_http_error(exc)) from exc
         finally:
@@ -801,17 +1095,26 @@ class _Copy:
         with self.cond:
             self.in_flight[rel] = have
             d.received = self.done_bytes + sum(self.in_flight.values())
-            if peer is not None:
-                self.net_bytes += new
-                entry = d.contributors.setdefault(peer.peer_id, [peer.name, 0])
-                entry[0] = peer.name
-                entry[1] += new
+        if peer is not None:
+            self._counted(peer, new)
 
-    def _file_done(self, rel: str, sha: str, size: int, wrote: bool) -> None:
+    def _counted(self, peer: Peer, n: int) -> None:
+        """n more bytes came from `peer` (for the speed shown, and who sent what)."""
+        with self.cond:
+            self.net_bytes += n
+            entry = self.d.contributors.setdefault(peer.peer_id, [peer.name, 0])
+            entry[0] = peer.name
+            entry[1] += n
+
+    def _file_done(self, rel: str, sha: str, path: str, wrote: bool) -> None:
         d = self.d
+        st = os.stat(path)
         with self.cond:
             self.in_flight.pop(rel, None)
-            self.done_bytes += size
+            self.done_bytes += st.st_size
+            d.stamps[rel] = (st.st_size, st.st_mtime_ns)  # before it's in the log other peers read
+            if d.done.get(rel) != sha:
+                d.done_log.append((rel, sha))
             d.done[rel] = sha
             if wrote:
                 d.written.add(rel)
@@ -842,7 +1145,25 @@ class _Copy:
         self.m.steam.request_rescan()
 
 
-def _file_entry(item: object) -> tuple[str, int, str, bool] | None:
+class _FileProgress:
+    """Where a big file's swarm session reports its progress (swarm.SwarmProgress): into the game's."""
+
+    def __init__(self, copy: _Copy, rel: str):
+        self._copy = copy
+        self._rel = rel
+        self.speed = 0.0  # the game's speed is measured over all its files
+        self.contributors: dict = {}  # and who sent what, by _Copy._counted
+
+    @property
+    def received(self) -> int:
+        return self._copy.in_flight.get(self._rel, 0)
+
+    @received.setter
+    def received(self, value: int) -> None:
+        self._copy._progress(self._rel, value)
+
+
+def _file_entry(item: object) -> _Entry | None:
     if not isinstance(item, dict):
         return None
     rel, size, sha = item.get("p"), item.get("s"), item.get("h")
@@ -856,7 +1177,18 @@ def _file_entry(item: object) -> tuple[str, int, str, bool] | None:
         return None
     if rel.endswith(PART_SUFFIX):
         return None
-    return rel.replace("\\", "/"), size, sha, item.get("x") == 1
+    pieces = None
+    raw = item.get("ph")  # piece hashes, for big files (LightningLAN 1.7+)
+    if raw is not None and swarmable(size):
+        if not isinstance(raw, str):
+            return None
+        try:
+            pieces = base64.b64decode(raw.encode("ascii"), validate=True)
+        except ValueError:
+            return None
+        if len(pieces) != piece_count(size) * DIGEST_SIZE:
+            return None
+    return rel.replace("\\", "/"), size, sha, item.get("x") == 1, pieces
 
 
 def _hash_prefix(part: str, length: int, digest, stop: threading.Event) -> int:

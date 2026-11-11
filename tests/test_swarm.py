@@ -27,6 +27,7 @@ from lightninglan.pieces import (
     piece_size_for,
 )
 from lightninglan.serving import UploadLimiter
+from lightninglan.swarm import PER_SOURCE
 from lightninglan.transfers import COMPLETED, MAX_ACTIVE_DOWNLOADS, PARTIAL_DIR_NAME, DownloadManager
 
 from .conftest import LAN_CLIENT
@@ -321,7 +322,8 @@ def test_bad_pieces_are_rejected_and_the_peer_dropped(swarm):
     assert d["status"] == COMPLETED, d
     assert Path(d["path"]).read_bytes() == content
     pieces_asked = [p for p, _ in liar.requests if p.startswith("/api/piece/")]
-    assert len(pieces_asked) == 2, "dropped after two bad pieces"
+    # No new request after the first bad piece: only those already in flight then.
+    assert 2 <= len(pieces_asked) <= PER_SOURCE, "dropped after two bad pieces"
     assert all(p["peer_id"] != liar.peer_id for p in d["swarm"]["peers"])
 
 
@@ -417,6 +419,23 @@ def test_downloaders_trade_pieces_instead_of_all_asking_the_sharer(spawn):
         assert sha256_of(p.downloads / "film.mkv") == file_id
         from_others = sum(x["bytes"] for x in d["swarm"]["peers"] if x["peer_id"] != a.peer_id)
         assert from_others > 0, f"{p.name} got nothing from the other downloaders"
-    assert sent_by_sharer < 2 * size, f"the sharer sent {sent_by_sharer / MB:.0f} MB for 3 downloads"
+    # The sharer sends each piece once while some haven't gone out (serving.SeedLedger).
+    assert sent_by_sharer < 1.5 * size, f"the sharer sent {sent_by_sharer / MB:.0f} MB for 3 downloads"
     print(f"3 downloads of {size // MB} MB from a 4 MB/s sharer: {elapsed:.1f}s, "
           f"sharer sent {sent_by_sharer / MB:.1f} MB")
+
+
+@pytest.mark.integration
+def test_compressible_files_travel_compressed(spawn):
+    lines = b"".join(b"%08d the same kind of line over and over, as game data often is\n" % i for i in range(300_000))
+    a = spawn("Sharer", start=False)
+    (a.share / "notes.txt").write_bytes(lines)
+    file_id = hashlib.sha256(lines).hexdigest()
+    b = spawn("B")
+    a.start()
+    wait_until_listed(b, file_id, a, timeout=60)
+    d = wait_download(b, b.post("/api/downloads", json={"file_id": file_id}).json()["id"], timeout=120)
+    assert d["status"] == "completed", d
+    assert sha256_of(b.downloads / "notes.txt") == file_id
+    sent = a.get("/api/status").json()["uploaded_bytes"]
+    assert sent < len(lines) / 4, f"{sent} bytes went out for a {len(lines)}-byte file"

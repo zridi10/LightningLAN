@@ -19,6 +19,7 @@ import httpx
 
 from .auth import REASONS, Authenticator
 from .discovery import ServiceRecord
+from .netutil import tls_context
 from .pathsafe import display_name
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class Peer:
     name_auto: bool = False  # its name was made up by LightningLAN (1.3+), so it gives way when names clash
     steam_os: str | None = None  # the kind of computer its Steam games are for (1.6+)
     steam_games: tuple[RemoteGame, ...] = ()
+    steam_copying: frozenset[tuple[int, str]] = frozenset()  # (appid, buildid) it is getting, and passes on (1.7+)
 
     @property
     def online(self) -> bool:
@@ -147,6 +149,25 @@ def parse_steam(payload: dict) -> tuple[str | None, tuple[RemoteGame, ...]]:
     return system, tuple(found.values())
 
 
+def parse_steam_copying(payload: dict) -> frozenset[tuple[int, str]]:
+    """The Steam games (appid, buildid) a peer's index says it is getting from others: it passes on
+    the files it has so far (GET /api/steam-copy/<appid>)."""
+    raw = payload.get("steam")
+    copying = raw.get("copying") if isinstance(raw, dict) else None
+    if not isinstance(copying, list):
+        return frozenset()
+    found = set()
+    for item in copying[:MAX_STEAM_GAMES]:
+        if not isinstance(item, dict):
+            continue
+        appid, buildid = item.get("appid"), item.get("buildid")
+        if not isinstance(appid, int) or isinstance(appid, bool) or not 0 < appid < 2**32:
+            continue
+        if isinstance(buildid, str) and buildid.isdigit() and len(buildid) <= 19:
+            found.add((appid, buildid))
+    return frozenset(found)
+
+
 def parse_index(payload: object, expected_peer_id: str) -> tuple[str, tuple[RemoteFile, ...], int]:
     """Validate another peer's /api/files response. Malformed entries are dropped."""
     if not isinstance(payload, dict):
@@ -194,6 +215,7 @@ class PeerTable:
     async def start(self) -> None:
         self._wake = asyncio.Event()
         self._client = httpx.AsyncClient(
+            verify=tls_context(),
             timeout=httpx.Timeout(5.0, connect=2.0),
             limits=httpx.Limits(max_connections=64, max_keepalive_connections=32),
             trust_env=False,  # never route LAN traffic through a configured HTTP proxy
@@ -329,6 +351,7 @@ class PeerTable:
             if not self.auth.verify_response(headers, resp.headers):
                 raise _Ignored(REASONS["no_proof"])
             if resp.status_code == 304:
+                await resp.aread()  # empty, but unread httpx closes the connection instead of reusing it
                 self._succeeded(peer, address)
                 return
             if resp.status_code != 200:
@@ -346,6 +369,7 @@ class PeerTable:
         if steam != (peer.steam_os, peer.steam_games):
             self.version += 1  # ThunderCLOUD lists its games
         peer.steam_os, peer.steam_games = steam
+        peer.steam_copying = parse_steam_copying(payload)
         if name and name != peer.name:
             peer.name = name
             self.version += 1  # ThunderCLOUD shows its files under the new name
@@ -388,6 +412,7 @@ class PeerTable:
         peer.ignore_reason = reason
         peer.files = ()
         peer.steam_games = ()
+        peer.steam_copying = frozenset()
         peer.etag = None
         peer.next_poll = time.monotonic() + IGNORED_RETRY_INTERVAL
 

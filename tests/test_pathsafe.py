@@ -7,6 +7,9 @@ from lightninglan.pathsafe import (
     UnsafePathError,
     display_name,
     numbered_names,
+    open_within,
+    plain,
+    resolve,
     safe_join,
     safe_local_filename,
     split_extension,
@@ -106,6 +109,40 @@ def test_split_relative_normalises_separators():
     assert split_relative("a\\b/c.txt") == ["a", "b", "c.txt"]
 
 
+def test_plain_drops_the_extended_length_prefix():
+    assert plain("\\\\?\\C:\\Games\\x.pak") == "C:\\Games\\x.pak"
+    assert plain("\\\\?\\UNC\\server\\share\\x.pak") == "\\\\server\\share\\x.pak"
+    assert plain("C:\\Games\\x.pak") == "C:\\Games\\x.pak"
+    assert plain("\\\\server\\share") == "\\\\server\\share"
+    assert plain("/home/me/x") == "/home/me/x"
+
+
+@windows_only
+def test_safe_join_survives_a_file_locked_while_it_resolves(tmp_path, monkeypatch):
+    # realpath checks the path twice; if a virus scanner opens the file in between, it keeps the
+    # \\?\ prefix, and the file seemed to be outside its folder.
+    import ntpath
+
+    (tmp_path / "x.dat").write_bytes(b"x")
+    real = ntpath._getfinalpathname
+    calls = []
+
+    def flaky(path):
+        calls.append(path)
+        if len(calls) == 2:
+            error = OSError(13, "The process cannot access the file because it is being used by another process")
+            error.winerror = 32
+            raise error
+        return real(path)
+
+    monkeypatch.setattr(ntpath, "_getfinalpathname", flaky)
+    root = Path(str(tmp_path))
+    assert resolve(root / "x.dat") == root.resolve() / "x.dat"
+    calls.clear()
+    monkeypatch.setattr(ntpath, "_getfinalpathname", flaky)
+    assert safe_join(root, "x.dat").name == "x.dat"
+
+
 def test_safe_join_rejects_non_string(tmp_path):
     with pytest.raises(UnsafePathError):
         safe_join(tmp_path, None)  # type: ignore[arg-type]
@@ -147,6 +184,32 @@ def test_junction_escaping_root_is_rejected(tmp_path):
         safe_join(root, "junction/secret.txt")
     with pytest.raises(UnsafePathError):
         safe_join(root, "junction/new-upload.txt")
+
+
+def test_open_within_reads_inside_and_refuses_the_rest(tmp_path):
+    root = resolve(tmp_path / "share")
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "a.txt").write_text("inside")
+    (tmp_path / "secret.txt").write_text("secret")
+    with open_within(root, "sub/a.txt") as f:
+        assert f.read() == b"inside"
+    for bad in TRAVERSAL_AND_ABSOLUTE:
+        with pytest.raises(UnsafePathError):
+            open_within(root, bad)
+    with pytest.raises(OSError):
+        open_within(root, "sub/missing.txt")
+
+
+@windows_only
+def test_open_within_refuses_a_junction_out_of_the_folder(tmp_path):
+    root = resolve(tmp_path / "root")
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+    make_junction(outside, root / "junction")
+    with pytest.raises(UnsafePathError):
+        open_within(root, "junction/secret.txt")
 
 
 def test_display_name_strips_bidi_and_control_characters():

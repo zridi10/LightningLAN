@@ -19,6 +19,7 @@ import segno
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from .netutil import tls_context
 from .pathsafe import display_name
 from .peers import describe_http_error
 from .serving import UploadLimiter, UploadsCut
@@ -101,7 +102,7 @@ async def relay_download(node: Node, file_id: str, request: Request) -> Response
     for peer, remote in sources:
         headers = node.auth.sign_request(request.method, path)
         headers.update(forwarded)
-        client = httpx.AsyncClient(timeout=RELAY_TIMEOUT, trust_env=False)
+        client = httpx.AsyncClient(timeout=RELAY_TIMEOUT, trust_env=False, verify=tls_context())
         try:
             upstream = await client.send(
                 client.build_request(request.method, f"{peer.base_url()}{path}", headers=headers), stream=True

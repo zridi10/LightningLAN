@@ -11,6 +11,7 @@ import hashlib
 import os
 import threading
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Sequence
 
@@ -83,7 +84,7 @@ class PieceInfo:
     size: int
     hashes: bytes  # 32-byte SHA-256 digests, concatenated
 
-    @property
+    @cached_property
     def piece_size(self) -> int:
         return piece_size_for(self.size)
 
@@ -125,13 +126,22 @@ class PieceInfo:
         return cls(file_id, size, hashes)
 
 
+_DIGITS = bytes.maketrans(b"\x00\x01", b"01")
+_BITS = bytes.maketrans(b"01", b"\x00\x01")
+
+
 def encode_bits(have: Sequence[int]) -> str:
     """A have-map (one 0/1 entry per piece) as base64 of the packed bits, first piece in the high bit."""
-    packed = bytearray((len(have) + 7) // 8)
-    for i, bit in enumerate(have):
-        if bit:
-            packed[i >> 3] |= 0x80 >> (i & 7)
-    return base64.b64encode(bytes(packed)).decode("ascii")
+    return base64.b64encode(pack_bits(have)).decode("ascii")
+
+
+def pack_bits(have: Sequence[int]) -> bytes:
+    """One 0/1 entry per piece packed eight to a byte, first piece in the high bit (in C, not per piece)."""
+    if not have:
+        return b""
+    digits = bytes(have).translate(_DIGITS)
+    digits += b"0" * (-len(digits) % 8)
+    return int(digits, 2).to_bytes(len(digits) // 8, "big")
 
 
 def decode_bits(text: str, count: int) -> bytearray:
@@ -139,4 +149,7 @@ def decode_bits(text: str, count: int) -> bytearray:
     packed = base64.b64decode(text.encode("ascii"), validate=True)
     if len(packed) != (count + 7) // 8:
         raise ValueError("have-map has the wrong length")
-    return bytearray(1 if packed[i >> 3] & (0x80 >> (i & 7)) else 0 for i in range(count))
+    if not packed:
+        return bytearray()
+    digits = format(int.from_bytes(packed, "big"), f"0{len(packed) * 8}b")[:count]
+    return bytearray(digits.encode("ascii").translate(_BITS))

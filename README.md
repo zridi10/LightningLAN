@@ -15,7 +15,8 @@ shared folder. Click **Download** to fetch a file directly from the peer that ha
   [Swarm downloads](#swarm-downloads)).
 - Steam games: one button shares the games installed in your Steam library, and everyone else
   gets them straight into their own Steam library, copied over the LAN instead of downloaded
-  from the internet (see [Steam games](#steam-games)).
+  from the internet. People getting the same game pass it on to each other as it arrives (see
+  [Steam games](#steam-games)).
 - Downloads stream to disk, resume after an interruption and are verified piece by piece and
   then as a whole (SHA-256) before they are saved. If a sending peer disappears, the others
   carry on.
@@ -102,6 +103,7 @@ and falls back to the browser where WebView2 is missing.
 | `--interface IP` | Advertise only on this local IPv4 address (repeatable). By default the LAN interfaces are detected automatically. |
 | `--refresh-interval SECONDS` | How often peers are polled for changes. Default `3`. |
 | `--max-upload-rate MB_PER_S` | Limit your total upload to other peers (all transfers together). Default: unlimited. |
+| `--max-download-rate MB_PER_S` | Limit your total download from other peers (all downloads and Steam games together). Default: unlimited. |
 | `--steam-dir FOLDER` | Where Steam is installed, if LightningLAN doesn't find it by itself (see [Steam games](#steam-games)). |
 | `--no-browser` | Don't open the browser on start. |
 | `--no-tray` | No tray icon and no pop-up error messages, for servers and scripts. The tray is also skipped automatically when there is no desktop session. |
@@ -336,13 +338,48 @@ fetches up to 8 pieces at a time from every peer that has them:
   the download is still in the Downloads list. Removing it from the list, clearing finished downloads, or
   changing the saved file stops that.
 
-Usually the sharer's upload is the bottleneck. So while some pieces exist only at the sharer, a
-downloader asks it only for those, and gets everything else from the fellow downloaders. On
-this PC, 10 downloaders starting a 100 MB file at once from a sharer capped at 10 MB/s all
-finished in 14–18 seconds. Without swarming each would take at least 100 seconds, and a single
-download alone takes 10. Those peers all ran on one computer, so their uploads to each other
-weren't limited; on a real network, each downloader's own upload speed matters too. On one
-shared Wi-Fi network the gain is smaller, because every transfer uses the same radio channel.
+Usually the sharer's upload is the bottleneck, so it should send every piece once, and the
+downloaders should pass each one on as soon as they have it:
+
+- While some pieces exist only at the sharer, a downloader asks it only for those, and gets
+  everything else from the fellow downloaders.
+- The sharer keeps a ledger of what it has sent. Asked for a piece that has already gone out
+  while others haven't, it sends the first one that hasn't instead (and says so). It also tells
+  each downloader who else is fetching the file from it, so they start passing pieces to each
+  other at once, without waiting for each other's file lists.
+- A downloader that's short of pieces to fetch looks at its fellows' pieces ten times a second.
+- The whole file's SHA-256 is worked out while it downloads, piece by piece in order, so there
+  is no second pass over the file at the end.
+- Pieces are compressed on the way (zstd) when that makes them smaller, between peers that
+  both take it. Files that don't compress (video, archives, already packed game data) are
+  noticed after their first few megabytes and then sent as they are.
+- A piece nobody else has yet should go to a peer that passes pieces on quickly. Each request to
+  the sharer also says which pieces the asker has in full, so the sharer sees how long the pieces
+  it sent first to each peer take to reach another. A peer whose pieces stay with it far longer
+  than everyone else's (a laptop on Wi-Fi, say) is told to take pieces from the others for a
+  while, so it doesn't hold up the rest.
+
+Measured on one PC, with every peer a separate process and every link capped in software to
+model a network (`--max-upload-rate` and `--max-download-rate`). "Best possible" is worked out
+from those caps (the time the sharer needs to send the file once, or the slowest download), not
+from what real hardware allows:
+
+| Test | Best possible | LightningLAN 1.6.1 | LightningLAN 1.7.0 |
+|---|---|---|---|
+| 1 sharer → 8 downloaders, 512 MiB, 10 MiB/s links (a gigabit party at a tenth of the speed) | 51.2 s | 62.6 s (1.22×) | 51.6 s (1.01×) |
+| 1 sharer → 2 downloaders, 2 GiB, 110 MiB/s links (about gigabit) | 18.6 s | — | 18.8–20.1 s (1.01–1.08×) |
+| the same, half the data compressible | 18.6 s | — | 16.6 s |
+| one 2 GiB download, no limits | — | 75–80 MB/s | 180–350 MB/s |
+
+The same tests with plausible real-world trouble added (a round trip of 0.3 ms plus up to 2 ms of
+switch queueing on every request, TCP retransmission stalls of 200–300 ms, a link buffer of 5 ms
+rather than a quarter second): 1.06× for the 1 → 8 test (1.09× on a cheap switch with frequent
+stalls), and 1.11–1.24× for the 1 → 2 test at gigabit speed. With a slow-disk PC and a Wi-Fi
+laptop among the eight, the six other PCs finished within 1.07–1.11× (1.32× before slow peers
+were steered away from pieces nobody else had), and the two slow ones within 1.01–1.04× of what
+their own disk and link allow. These all ran on one computer, which caps how far they go: on a
+real network each PC runs only its own copy. On one shared Wi-Fi network the gain is smaller,
+because every transfer uses the same radio channel.
 
 Every piece is checked against its hash before it is kept or passed on. A peer that sends two
 bad pieces is dropped for the rest of the download. If pieces keep failing against the piece
@@ -375,6 +412,15 @@ says **In your library** instead of **Get**.
 - Files come from every online computer sharing the same build of the game, four at a time, and
   each one is checked against its SHA-256 before it takes its place. If a sharer goes away, the
   others carry on; with nobody left, the copy stops, and **Resume** continues it later.
+- People getting the same game at the same time pass it on to each other, as swarm downloads do.
+  Each one serves the files it has copied, and takes the files only the sharers have in its own
+  order, so they fetch different ones from the sharers and swap the rest. Files of 64 MiB and up
+  are listed with piece hashes and copied piece by piece, so a big file is passed on while it is
+  still being copied. The small files are split between the peers getting the game, each taking
+  its share first. On this PC, 4 peers getting a 150 MiB game from a sharer whose upload was
+  capped at 10 MiB/s all had it in about 16 seconds (15 is the least possible); when each copied
+  it from the sharer alone, that took 61. A copy is passed on while it's going and, once done,
+  while it's still in the Downloads list, as long as its files haven't changed.
 - Pause and Resume keep what was copied. Files already in the game's folder that match are kept
   too, so a folder left by an earlier copy (or by Steam) isn't copied again. **Cancel** deletes
   what the copy put there.
@@ -456,8 +502,11 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
   list, never by a path from the network. With **Share my Steam games** on, also the shared
   games' file lists (`GET /api/steam/<appid>`) and the files inside those games' folders
   (`GET /api/steam/<appid>/<path>`): the path is checked to stay inside the game's folder, so
-  nothing else in Steam's folders can be reached. While LightningLAN is stopped (or its page is
-  closed), all of these answer "503 offline", and transfers in progress are cut off.
+  nothing else in Steam's folders can be reached. While you're getting a game (and while it's in
+  the Downloads list after), also the list of its files copied so far
+  (`GET /api/steam-copy/<appid>`) and those files, the same way, whether or not you share your
+  Steam games. While LightningLAN is stopped (or its page is closed), all of these answer
+  "503 offline", and transfers in progress are cut off.
 - **Steam games are checked against the sharer, not Steam.** A copied game matches the sharer's
   file list exactly, but like any file from a peer, it's only as trustworthy as the computer it
   came from. In Steam, the game's **Properties** → **Installed Files** → **Verify integrity of
@@ -465,7 +514,10 @@ sudo firewall-cmd --permanent --add-port=8765/tcp --add-service=mdns && sudo fir
 - **What swarming reveals.** Your file list includes the hashes of files you are downloading or
   have downloaded (while they are in the Downloads list), so other peers can tell which shared
   files you fetched. Pieces of those files are served only to peers asking for them by hash,
-  that is, peers who can already see the file in someone's share.
+  that is, peers who can already see the file in someone's share. In the same way, it says which
+  Steam games (and builds) you're getting, and the files of them you have so far are served to
+  peers asking for that game. Asking a sharer for a piece, a downloader also says who it is and
+  which pieces it has, and the sharer tells it who else is fetching that file.
 - **Phones.** The phone page (`/phone`) and the pages' scripts, styles and pictures
   (`/static/`) are open to the LAN; neither holds anything private. The phone API
   (`/phone/api/...`: ThunderCLOUD, downloads, sending files into the share) needs the key from
@@ -599,7 +651,7 @@ lightninglan/
   security.py    LAN vs. localhost access rules, CSRF/DNS-rebinding checks, security headers
   auth.py        passphrase HMAC tokens and proofs
   discovery.py   zeroconf advertising and browsing
-  netutil.py     choosing which network interfaces to advertise on
+  netutil.py     choosing which network interfaces to advertise on, the HTTP clients' TLS context
   peers.py       peer table, polling and health checks
   indexer.py     scanning the shared folder, SHA-256 hash cache
   common.py      merging indexes into ThunderCLOUD
@@ -607,11 +659,13 @@ lightninglan/
   phone.py       phones: QR code links, relaying other peers' files with SHA-256 checks
   play.py        While you wait: the head-to-head games, records, and syncing with opponents
   games.py       the rules of every head-to-head game (the same as the Android app's Games.kt)
-  serving.py     streaming files and pieces to peers, Range requests, the upload limit
+  serving.py     streaming files and pieces to peers, Range requests, the upload and download limits,
+                 the sharer's ledger of pieces sent
+  compress.py    compressing transfers between peers (zstd) where it pays
   steam.py       Steam games: finding the libraries, reading manifests, hashing shared games
   steamget.py    getting a Steam game from other peers into a Steam library here
   transfers.py   download manager: queue, resume, verification, fall-back to whole files
-  swarm.py       swarm downloads: choosing pieces and peers, passing pieces on
+  swarm.py       swarm downloads: choosing pieces and peers, passing pieces on, hashing as they arrive
   pieces.py      piece sizes, piece hashes, have-maps
   uploads.py     receiving files from the UI
   pathsafe.py    path traversal protection and file-name sanitising
