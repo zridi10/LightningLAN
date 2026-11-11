@@ -172,6 +172,8 @@ other by themselves.
   see each other. Leave it empty to share with everyone on your network running LightningLAN.
 - **Opening the page again**: open LightningLAN again. If it's already running, it just opens the
   page and doesn't start a second copy. You can also click the tray icon.
+- **Updating**: download the new version and open it. If the old one is still running, the new
+  one closes it and starts in its place, with the same settings.
 - **Stopping for a while**: click **Stop LightningLAN** on the page. Others stop seeing your
   files and your downloads pause. Click **Start LightningLAN** to carry on.
 - **Closing the page** does the same as Stop, a few seconds after you close it. Open the page

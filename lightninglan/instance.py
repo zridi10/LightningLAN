@@ -2,7 +2,8 @@
 
 The running instance holds a lock file in the app-data folder and records the port it listens
 on. A second launch finds that record, checks that the instance answers, and opens its web UI
-instead of starting another copy.
+instead of starting another copy, unless the running copy is an older version or can no longer
+load its own pages: then the new launch asks it to quit and takes its place.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
@@ -86,21 +88,27 @@ else:
         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
-def running_instance_url(state_dir: Path, timeout: float = 15.0) -> str | None:
-    """The web UI address of the instance holding the lock, once it answers; None if it never does.
+@dataclass(frozen=True)
+class RunningInstance:
+    url: str  # its web UI
+    version: str  # "" if it didn't say
+
+
+def running_instance(state_dir: Path, timeout: float = 15.0) -> RunningInstance | None:
+    """The instance holding the lock, once it answers; None if it never does.
 
     Waits up to `timeout` seconds, since the other instance may still be starting.
     """
     info_path = Path(state_dir) / INSTANCE_FILE
     deadline = time.monotonic() + timeout
     while True:
-        url = _probe(info_path)
-        if url is not None or time.monotonic() >= deadline:
-            return url
+        found = _probe(info_path)
+        if found is not None or time.monotonic() >= deadline:
+            return found
         time.sleep(0.25)
 
 
-def _probe(info_path: Path) -> str | None:
+def _probe(info_path: Path) -> RunningInstance | None:
     try:
         info = json.loads(info_path.read_text(encoding="utf-8"))
         port, peer_id = int(info["port"]), str(info["peer_id"])
@@ -108,8 +116,39 @@ def _probe(info_path: Path) -> str | None:
         return None  # not written yet
     try:
         r = httpx.get(f"http://127.0.0.1:{port}/api/status", timeout=2.0, trust_env=False, verify=tls_context())
-        if r.status_code == 200 and r.json().get("peer_id") == peer_id:
-            return f"http://localhost:{port}"
+        status = r.json() if r.status_code == 200 else {}
+        if status.get("peer_id") == peer_id:
+            return RunningInstance(f"http://localhost:{port}", str(status.get("version") or ""))
     except (httpx.HTTPError, ValueError, AttributeError):
         pass
     return None
+
+
+def is_newer(version: str, than: str) -> bool:
+    """Whether `version` is a later release than `than` ("1.7.1" is later than "1.7.0").
+
+    A version that can't be read is never later, nor earlier, than another.
+    """
+    a, b = _release(version), _release(than)
+    return a is not None and b is not None and a > b
+
+
+def _release(version: str) -> tuple[int, ...] | None:
+    try:
+        return tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return None
+
+
+def pages_missing(url: str) -> bool:
+    """Whether the running copy answers that its pages are gone.
+
+    The packaged app runs from files unpacked into the temp folder, and a temp-folder clean-up can
+    delete them while it runs: its window then shows only "Internal Server Error". A copy that
+    doesn't answer at all is not counted as missing them, since it may just be busy.
+    """
+    try:
+        r = httpx.head(f"{url}/static/index.html", timeout=5.0, trust_env=False)
+    except httpx.HTTPError:
+        return False
+    return r.status_code != 200

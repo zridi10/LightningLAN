@@ -2,7 +2,8 @@
 
 With no arguments it runs zero-config: default folders, the computer's name, port 8765 (or the
 next free one), a tray icon, and the web UI opened in the browser (in the packaged Windows app,
-in a window of its own). Launching it again while it runs just shows the web UI of the running copy.
+in a window of its own). Launching it again while it runs just shows the web UI of the running copy,
+unless the running copy is an older version or has lost its pages: then this one takes its place.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import uvicorn
 from . import __version__
 from .config import ConfigError, Settings, default_config_path, load_settings
 from .desktop import open_url, restore_library_path, show_message
-from .instance import InstanceLock, running_instance_url
+from .instance import InstanceLock, RunningInstance, is_newer, pages_missing, running_instance
 from .logs import add_file_logging, log_dir, log_uncaught_exceptions, setup_console_logging
 from .node import Node
 from .resources import is_frozen
@@ -33,6 +34,7 @@ from .server import create_app
 log = logging.getLogger("lightninglan")
 
 PORT_SEARCH_RANGE = 20  # without --port, try this many ports from the remembered one
+QUIT_WAIT = 30.0  # seconds a running copy has to quit when a newer one takes over
 FILE_ONLY = {"file_only": True}
 
 
@@ -238,10 +240,30 @@ def _run(args: argparse.Namespace, gui: bool) -> int:
         acquired = lock.acquire()
     except OSError as exc:
         raise Fatal(f"cannot use the settings folder {state_dir}: {exc.strerror or exc}", 2) from exc
+    took_over_from = None
     if not acquired:
-        return _hand_over(state_dir, args)
+        running = running_instance(state_dir)
+        if running is None:
+            raise Fatal(
+                "LightningLAN is already running but is not responding. Wait a moment and try again, "
+                "or quit it from its tray icon.",
+                1,
+            )
+        reason = _replace_reason(running)
+        if reason is None:
+            return _hand_over(running.url, args)
+        print(f"LightningLAN {reason}: asking it to quit", flush=True)
+        if not _take_over(running.url, lock):
+            raise Fatal(
+                f"LightningLAN {reason}, and it didn't quit. Quit it from its tray icon, then open "
+                f"LightningLAN again.",
+                1,
+            )
+        took_over_from = running.version or "unknown"
     try:
         add_file_logging(state_dir)
+        if took_over_from:
+            log.info("took the place of LightningLAN %s, which was running", took_over_from, extra=FILE_ONLY)
         try:
             settings = settings_from_args(args)
         except ConfigError as exc:
@@ -263,15 +285,32 @@ def _run(args: argparse.Namespace, gui: bool) -> int:
         lock.release()
 
 
-def _hand_over(state_dir: Path, args: argparse.Namespace) -> int:
+def _replace_reason(running: RunningInstance) -> str | None:
+    """Why this launch should take the running copy's place, or None to just show it."""
+    if is_newer(__version__, running.version):
+        return f"{running.version} is running and this is {__version__}"
+    if pages_missing(running.url):
+        return "is running but its files were deleted from the temp folder"
+    return None
+
+
+def _take_over(url: str, lock: InstanceLock) -> bool:
+    """Ask the running copy to quit (every version since 1.0 can), then take the lock it held."""
+    try:
+        if _ask_running(url, "/api/shutdown").get("ok") is not True:
+            return False  # it runs in a mode that can't quit this way
+    except (OSError, ValueError, AttributeError):
+        return False
+    deadline = time.monotonic() + QUIT_WAIT
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        if lock.acquire():
+            return True
+    return False
+
+
+def _hand_over(url: str, args: argparse.Namespace) -> int:
     """Another copy is running with this config: show its web UI instead of starting a second one."""
-    url = running_instance_url(state_dir)
-    if url is None:
-        raise Fatal(
-            "LightningLAN is already running but is not responding. Wait a moment and try again, "
-            "or quit it from its tray icon.",
-            1,
-        )
     print(f"LightningLAN is already running: {url}", flush=True)
     if not args.no_browser and not _show_running_window(url):
         open_url(url)
@@ -284,14 +323,18 @@ def _show_running_window(url: str) -> bool:
         import ctypes
 
         ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY: it may come to the front
-    request = urllib.request.Request(
-        f"{url}/api/show-window", data=b"", method="POST", headers={"X-LightningLAN-Client": "launcher"},
-    )
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=10) as resp:
-            return json.loads(resp.read()).get("shown") is True
-    except (OSError, ValueError):  # an older copy without this, or it is shutting down
+        return _ask_running(url, "/api/show-window").get("shown") is True
+    except (OSError, ValueError, AttributeError):  # an older copy without this, or it is shutting down
         return False
+
+
+def _ask_running(url: str, path: str):
+    """POST to the running copy's local API, as a launcher; its JSON answer."""
+    request = urllib.request.Request(f"{url}{path}", data=b"", method="POST",
+                                     headers={"X-LightningLAN-Client": "launcher"})
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=10) as resp:
+        return json.loads(resp.read())
 
 
 def _serve(settings: Settings, sock: socket.socket, args: argparse.Namespace, gui: bool) -> None:

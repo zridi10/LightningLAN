@@ -128,8 +128,10 @@ Next to it:
 - `logs/lightninglan.log` is the log, rotated at 1 MB with 3 old copies kept. Open it from the tray
   menu (**Open Log Folder**) or from Settings.
 - `lightninglan.lock` and `instance.json` keep LightningLAN to one copy per config file. Starting it
-  again while it runs just opens the running copy's web page. `--config` with a different file
-  starts an independent peer.
+  again while it runs just opens the running copy's web page, unless the running copy is an older
+  version, or a packaged copy whose unpacked files a temp-folder clean-up has deleted: then the new
+  one asks it to quit and starts in its place. `--config` with a different file starts an
+  independent peer.
 
 Nothing is ever written next to the program itself, so the packaged app runs from read-only
 locations too.
